@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "176532461706",
+    "project_id": "dukan-1120e",
+    "storage_bucket": "dukan-1120e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:176532461706:android:cdc10ded47a55e37ea7573",
+        "android_client_info": {
+          "package_name": "com.musdar.dukan",
+          "googleServicesFile" : "./google-services .json"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAYhL6XAZ4bCR1OcoCRrY0XmDyZJcNN0m4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

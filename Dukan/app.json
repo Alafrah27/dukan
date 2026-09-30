@@ -1,0 +1,69 @@
+{
+  "expo": {
+    "name": "Dukan",
+    "slug": "dukan",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/dukan.png",
+    "scheme": "dukan",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/expo.icon"
+    },
+    "android": {
+      "icon": "./assets/images/dukan.png",
+      "adaptiveIcon": {
+        "backgroundColor": "#F8F0F0",
+        "foregroundImage": "./assets/images/dukan.png",
+        "monochromeImage": "./assets/images/dukan.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.musdar.dukan",
+      "googleServicesFile": "./google-services .json"
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F8F0F0",
+          "image": "./assets/images/dukan.png",
+          "imageWidth": 144,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#F8F0F0",
+            "image": "./assets/images/dukan.png"
+          }
+        }
+      ],
+      "expo-maps",
+      "expo-localization",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "السماح لدكان باختيار صور التصنيفات من مكتبة الصور.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      "@clerk/expo",
+      "expo-secure-store",
+      "expo-notifications"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "341a266a-2045-4834-a640-6bdae3784e7a"
+      }
+    },
+    "owner": "musdar"
+  }
+}
