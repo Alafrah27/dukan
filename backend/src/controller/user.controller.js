@@ -191,3 +191,126 @@ export const updateUserRole = async (req, res) => {
   }
 };
 
+export const updateExpoPushToken = async (req, res) => {
+  try {
+    const auth = getAuth(req);
+    const { userId } = auth;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const { expoPushToken } = req.body;
+
+    if (!expoPushToken) {
+      return res.status(400).json({
+        success: false,
+        error: "expoPushToken is required",
+      });
+    }
+
+    const user = await User.findOneAndUpdate(
+      { clerkId: userId },
+      { expoPushToken, notificationsEnabled: true },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Push token updated successfully",
+      notificationsEnabled: user.notificationsEnabled,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Internal Server Error",
+      message: error.message,
+    });
+  }
+};
+
+export const toggleNotifications = async (req, res) => {
+  try {
+    const auth = getAuth(req);
+    const { userId } = auth;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const { enabled, expoPushToken } = req.body;
+
+    if (typeof enabled !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        error: "enabled (boolean) is required",
+      });
+    }
+
+    const updateData = { notificationsEnabled: enabled };
+
+    // When enabling, also save the push token if provided
+    if (enabled && expoPushToken) {
+      updateData.expoPushToken = expoPushToken;
+    }
+
+    // When disabling, clear the push token
+    if (!enabled) {
+      updateData.expoPushToken = "";
+    }
+
+    const user = await User.findOneAndUpdate(
+      { clerkId: userId },
+      updateData,
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: enabled
+        ? "Notifications enabled successfully"
+        : "Notifications disabled successfully",
+      notificationsEnabled: user.notificationsEnabled,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Internal Server Error",
+      message: error.message,
+    });
+  }
+};
+
+export const deleteMyAccount = async (req, res) => {
+  try {
+    const auth = getAuth(req);
+    const { userId } = auth;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const deletedUser = await User.findOneAndDelete({ clerkId: userId });
+
+    return res.status(200).json({
+      success: true,
+      message: "Account deleted successfully from database",
+      deletedUser,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Internal Server Error",
+      message: error.message,
+    });
+  }
+};
+

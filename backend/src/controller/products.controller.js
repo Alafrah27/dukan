@@ -1,12 +1,6 @@
-import { getAuth } from "@clerk/express";
 import Product from "../modal/products.modal.js";
-import User from "../modal/user.modal.js";
 import Cloudinary from "../lib/cloudinary.js";
 import fs from "fs/promises";
-
-// ──────────────────────────────────────────────
-//  Helpers
-// ──────────────────────────────────────────────
 
 /**
  * Extract Cloudinary public_id from a secure_url.
@@ -36,8 +30,18 @@ const uploadImagesToCloudinary = async (files) => {
     })
   );
 
-  const results = await Promise.all(uploadPromises);
-  return results.map((r) => r.secure_url);
+  const results = await Promise.allSettled(uploadPromises);
+  const uploadedUrls = results
+    .filter((result) => result.status === "fulfilled")
+    .map((result) => result.value.secure_url);
+  const failedUpload = results.find((result) => result.status === "rejected");
+
+  if (failedUpload) {
+    await deleteImagesFromCloudinary(uploadedUrls);
+    throw failedUpload.reason;
+  }
+
+  return uploadedUrls;
 };
 
 /**
@@ -45,7 +49,7 @@ const uploadImagesToCloudinary = async (files) => {
  */
 const deleteImagesFromCloudinary = async (urls) => {
   const deletePromises = urls
-    .filter((url) => url && url.includes("cloudinary"))
+    .filter((url) => typeof url === "string" && url.includes("cloudinary"))
     .map((url) => {
       const publicId = extractPublicId(url);
       if (publicId) return Cloudinary.uploader.destroy(publicId);
@@ -58,11 +62,8 @@ const deleteImagesFromCloudinary = async (urls) => {
 /**
  * Remove temporary files that multer wrote to disk.
  */
-const cleanupTempFiles = async (files) => {
-  if (!files || files.length === 0) return;
-  await Promise.allSettled(
-    files.map((file) => fs.unlink(file.path).catch(() => {}))
-  );
+const cleanupTempFiles = async (files = []) => {
+  await Promise.allSettled(files.map((file) => fs.unlink(file.path)));
 };
 
 /**
@@ -78,15 +79,37 @@ const safeParse = (value) => {
   }
 };
 
-// ──────────────────────────────────────────────
-//  CREATE PRODUCT  (POST /api/v1/products)
-//  Admin only — multipart/form-data
-// ──────────────────────────────────────────────
-export const createProduct = async (req, res) => {
-  try {
-    const { name, description, categoryId, basePrice, sizes, colors, isAvailable, hasDiscountPrice } = req.body;
+// Only accept editable product fields; both JSON and multipart requests use this mapping.
+const getProductFields = (body) => {
+  const fields = {};
 
-    // ── Validation ──
+  for (const key of ["name", "description", "categoryId"]) {
+    if (body[key] !== undefined) fields[key] = body[key];
+  }
+  if (body.basePrice !== undefined) fields.basePrice = Number(body.basePrice);
+  for (const key of ["sizes", "colors"]) {
+    if (body[key] !== undefined) fields[key] = safeParse(body[key]) || [];
+  }
+  for (const key of ["isAvailable", "hasDiscountPrice"]) {
+    if (body[key] !== undefined) fields[key] = safeParse(body[key]);
+  }
+
+  return fields;
+};
+
+const handleProductError = (res, error, action) => {
+  if (error.name === "CastError" || error.name === "ValidationError") {
+    return res.status(400).json({ error: "Invalid product data" });
+  }
+  console.error(`${action} error:`, error);
+  return res.status(500).json({ error: "Internal server error" });
+};
+
+export const createProduct = async (req, res) => {
+  let uploadedImages = [];
+  try {
+    const { name, categoryId, basePrice } = req.body;
+
     if (!name || !categoryId || basePrice === undefined) {
       return res.status(400).json({
         error: "name, categoryId, and basePrice are required",
@@ -99,30 +122,22 @@ export const createProduct = async (req, res) => {
       });
     }
 
-    // ── Upload images to Cloudinary ──
-    let imageUrls;
     try {
-      imageUrls = await uploadImagesToCloudinary(req.files);
+      uploadedImages = await uploadImagesToCloudinary(req.files);
     } catch (uploadError) {
       console.error("Cloudinary upload error:", uploadError);
       return res.status(500).json({ error: "Failed to upload images" });
     }
 
-    // ── Build product document ──
     const product = new Product({
       userId: req.user._id,
-      categoryId,
-      name,
-      description: description || "",
-      images: imageUrls,
-      sizes: safeParse(sizes) || [],
-      colors: safeParse(colors) || [],
-      basePrice: Number(basePrice),
-      isAvailable: isAvailable !== undefined ? safeParse(isAvailable) : true,
-      hasDiscountPrice: hasDiscountPrice !== undefined ? safeParse(hasDiscountPrice) : false,
+      ...getProductFields(req.body),
+      description: req.body.description || "",
+      images: uploadedImages,
     });
 
     await product.save();
+    uploadedImages = [];
 
     return res.status(201).json({
       success: true,
@@ -130,82 +145,64 @@ export const createProduct = async (req, res) => {
       product,
     });
   } catch (error) {
-    console.error("createProduct error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    await deleteImagesFromCloudinary(uploadedImages);
+    return handleProductError(res, error, "createProduct");
   } finally {
     await cleanupTempFiles(req.files);
   }
 };
 
-// ──────────────────────────────────────────────
-//  UPDATE PRODUCT  (PUT /api/v1/products/:id)
-//  Admin only — multipart/form-data
-// ──────────────────────────────────────────────
 export const updateProduct = async (req, res) => {
+  let uploadedImages = [];
   try {
     const { id } = req.params;
-    const {
-      name,
-      description,
-      categoryId,
-      basePrice,
-      sizes,
-      colors,
-      isAvailable,
-      hasDiscountPrice,
-      removedImages, // JSON array of Cloudinary URLs to remove
-    } = req.body;
 
     const product = await Product.findById(id);
     if (!product) {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    // ── Build updates ──
-    const updates = {};
+    const updates = getProductFields(req.body);
 
-    if (name !== undefined) updates.name = name;
-    if (description !== undefined) updates.description = description;
-    if (categoryId !== undefined) updates.categoryId = categoryId;
-    if (basePrice !== undefined) updates.basePrice = Number(basePrice);
-    if (sizes !== undefined) updates.sizes = safeParse(sizes) || [];
-    if (colors !== undefined) updates.colors = safeParse(colors) || [];
-    if (isAvailable !== undefined) updates.isAvailable = safeParse(isAvailable);
-    if (hasDiscountPrice !== undefined) updates.hasDiscountPrice = safeParse(hasDiscountPrice);
+    const removedImages = safeParse(req.body.removedImages) || [];
+    if (
+      !Array.isArray(removedImages) ||
+      removedImages.some((url) => typeof url !== "string")
+    ) {
+      return res.status(400).json({
+        error: "removedImages must be an array of image URLs",
+      });
+    }
+    const imagesToRemove = product.images.filter((url) => removedImages.includes(url));
+    const retainedImages = product.images.filter((url) => !removedImages.includes(url));
 
-    // ── Handle image changes ──
-    let currentImages = [...product.images];
-
-    // 1. Remove images the admin wants to delete
-    const imagesToRemove = safeParse(removedImages) || [];
-    if (imagesToRemove.length > 0) {
-      await deleteImagesFromCloudinary(imagesToRemove);
-      currentImages = currentImages.filter((img) => !imagesToRemove.includes(img));
+    if (retainedImages.length === 0 && !req.files?.length) {
+      return res.status(400).json({ error: "Product must have at least one image" });
     }
 
-    // 2. Upload newly added images
     if (req.files && req.files.length > 0) {
       try {
-        const newUrls = await uploadImagesToCloudinary(req.files);
-        currentImages = [...currentImages, ...newUrls];
+        uploadedImages = await uploadImagesToCloudinary(req.files);
       } catch (uploadError) {
         console.error("Cloudinary upload error:", uploadError);
         return res.status(500).json({ error: "Failed to upload new images" });
       }
     }
 
-    updates.images = currentImages;
-
-    // ── Ensure at least one image remains ──
-    if (updates.images.length === 0) {
-      return res.status(400).json({
-        error: "Product must have at least one image",
-      });
-    }
+    updates.images = [...retainedImages, ...uploadedImages];
 
     const updatedProduct = await Product.findByIdAndUpdate(id, updates, {
       new: true,
+      runValidators: true,
     });
+    if (!updatedProduct) {
+      await deleteImagesFromCloudinary(uploadedImages);
+      return res.status(404).json({ error: "Product not found" });
+    }
+    uploadedImages = [];
+
+    // Delete old images only after the database references their replacements.
+    await deleteImagesFromCloudinary(imagesToRemove);
 
     return res.status(200).json({
       success: true,
@@ -213,17 +210,13 @@ export const updateProduct = async (req, res) => {
       product: updatedProduct,
     });
   } catch (error) {
-    console.error("updateProduct error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    await deleteImagesFromCloudinary(uploadedImages);
+    return handleProductError(res, error, "updateProduct");
   } finally {
     await cleanupTempFiles(req.files);
   }
 };
 
-// ──────────────────────────────────────────────
-//  DELETE PRODUCT  (DELETE /api/v1/products/:id)
-//  Admin only
-// ──────────────────────────────────────────────
 export const deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
@@ -233,27 +226,21 @@ export const deleteProduct = async (req, res) => {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    // Delete all Cloudinary images
+    await Product.findByIdAndDelete(id);
+
     if (product.images && product.images.length > 0) {
       await deleteImagesFromCloudinary(product.images);
     }
-
-    await Product.findByIdAndDelete(id);
 
     return res.status(200).json({
       success: true,
       message: "Product deleted successfully",
     });
   } catch (error) {
-    console.error("deleteProduct error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return handleProductError(res, error, "deleteProduct");
   }
 };
 
-// ──────────────────────────────────────────────
-//  GET ALL PRODUCTS  (GET /api/v1/products)
-//  Public — with filtering, search, pagination
-// ──────────────────────────────────────────────
 export const getAllProducts = async (req, res) => {
   try {
     const {
@@ -268,7 +255,6 @@ export const getAllProducts = async (req, res) => {
       limit = 20,
     } = req.query;
 
-    // ── Build filter ──
     const filter = {};
 
     if (categoryId) filter.categoryId = categoryId;
@@ -285,17 +271,14 @@ export const getAllProducts = async (req, res) => {
       ];
     }
 
-    // ── Pagination ──
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     const skip = (pageNum - 1) * limitNum;
 
-    // ── Sort ──
     const allowedSortFields = ["createdAt", "basePrice", "name"];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     const sortOrder = order === "asc" ? 1 : -1;
 
-    // ── Query ──
     const [products, total] = await Promise.all([
       Product.find(filter)
         .populate("categoryId", "name image")
@@ -317,15 +300,10 @@ export const getAllProducts = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("getAllProducts error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return handleProductError(res, error, "getAllProducts");
   }
 };
 
-// ──────────────────────────────────────────────
-//  GET SINGLE PRODUCT  (GET /api/v1/products/:id)
-//  Public
-// ──────────────────────────────────────────────
 export const getProductById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -344,7 +322,6 @@ export const getProductById = async (req, res) => {
       product,
     });
   } catch (error) {
-    console.error("getProductById error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return handleProductError(res, error, "getProductById");
   }
 };

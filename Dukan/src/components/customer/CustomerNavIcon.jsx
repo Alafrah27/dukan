@@ -17,9 +17,10 @@ export default function CustomerNavIcon({ name, focused = false, size = 24 }) {
       <Rect x="3" y="14" width="7" height="7" rx="2" fill={fill} />
       <Rect x="14" y="14" width="7" height="7" rx="2" fill={fill} />
     </>}
-    {name === "notifications" && <>
-      <Path d="M5 10a7 7 0 0 1 14 0v4l2 3H3l2-3Z" fill={fill} />
-      <Path d="M9 21h6M12 2v1" />
+    {name === "cart" && <>
+      <Path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" fill={fill} />
+      <Path d="M3 6h18" stroke={detail} />
+      <Path d="M16 10a4 4 0 0 1-8 0" stroke={detail} />
     </>}
     {name === "settings" && <>
       <Path d="m9 3 1-1h4l1 3 2 1 3-.5 2 3-2 2v3l2 2-2 3-3-.5-2 1-1 3h-4l-1-3-2-1-3 .5-2-3 2-2v-3l-2-2 2-3 3 .5 2-1Z" fill={fill} />

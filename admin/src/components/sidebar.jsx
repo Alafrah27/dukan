@@ -13,6 +13,7 @@ import {
   X,
   LogIn,
   Gift,
+  Scissors,
 } from "lucide-react"
 import { NavLink } from "react-router-dom"
 import { useUser, Show, SignInButton, UserButton } from "@clerk/react"
@@ -21,6 +22,7 @@ const links = [
   { to: "/admin/dashboard", label: "لوحة التحكم", icon: LayoutDashboard },
   { to: "/admin/products", label: "المنتجات", icon: Package },
   { to: "/admin/categories", label: "الفئات", icon: Tags },
+  { to: "/admin/tailoring", label: "أسعار التفصيل", icon: Scissors },
   { to: "/admin/offers", label: "العروض", icon: Gift },
   { to: "/admin/orders", label: "الطلبات", icon: ShoppingBag },
   { to: "/admin/users", label: "المستخدمين", icon: Users },

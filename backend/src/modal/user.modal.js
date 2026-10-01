@@ -38,6 +38,14 @@ const UserSchema = new Schema(
       default: "user",
       index: true,
     },
+    expoPushToken: {
+      type: String,
+      default: "",
+    },
+    notificationsEnabled: {
+      type: Boolean,
+      default: true,
+    },
   },
   { timestamps: true }
 );
