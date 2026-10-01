@@ -10,6 +10,7 @@ import addressRoute from "./route/address.route.js";
 import categoryRoute from "./route/category.route.js";
 import productRoute from "./route/product.route.js";
 import cartRoute from "./route/cart.route.js";
+import tailoringRoute from "./route/tailoring.route.js";
 
 const app = express();
 
@@ -67,6 +68,7 @@ app.use("/api/v1/address", addressRoute);
 app.use("/api/v1/category", categoryRoute);
 app.use("/api/v1/products", productRoute);
 app.use("/api/v1/cart", cartRoute);
+app.use("/api/v1/tailoring", tailoringRoute);
 
 // 7. Error handling middleware (guarantees CORS headers & json response on errors)
 app.use((err, req, res, next) => {

@@ -5,6 +5,9 @@ import {
   getCurrentUser,
   updateUserRole,
   deleteUser,
+  updateExpoPushToken,
+  toggleNotifications,
+  deleteMyAccount,
 } from "../controller/user.controller.js";
 import {
   protectRoute,
@@ -18,6 +21,15 @@ router.post("/", createUser);
 
 // Get currently authenticated user profile
 router.get("/me", protectRoute, getCurrentUser);
+
+// Delete currently authenticated user account
+router.delete("/me", protectRoute, deleteMyAccount);
+
+// Update expo push token for notifications
+router.put("/update-expo-push-token", protectRoute, updateExpoPushToken);
+
+// Toggle notifications on/off
+router.put("/toggle-notifications", protectRoute, toggleNotifications);
 
 // Admin: Get all users with search & pagination
 router.get("/", protectRoute, adminProtectRoute, getAllUsers);

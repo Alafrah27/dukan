@@ -4,21 +4,89 @@ import Product from "../modal/products.modal.js";
 import TailoringPrice from "../modal/tailoring.modal.js";
 import User from "../modal/user.modal.js";
 
-// ──────────────────────────────────────────────
-//  GET CART  (GET /api/v1/cart)
-// ──────────────────────────────────────────────
+const CART_PRODUCT_FIELDS = "name images basePrice isAvailable purchaseoption";
+
+const getCartUser = async (req, res) => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return null;
+  }
+
+  const user = await User.findOne({ clerkId: userId });
+  if (!user) res.status(404).json({ error: "User not found" });
+  return user;
+};
+
+const parseQuantity = (value) => {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const quantity = Number(value);
+  return Number.isSafeInteger(quantity) && quantity > 0 ? quantity : null;
+};
+
+const validateTailoring = async (product, sizeType, measurements) => {
+  if (!sizeType) return "tailoringSizeType is required for this option";
+
+  const fields = product.masurmentConfig?.field || [];
+  if (fields.some((field) => field.require) && !measurements) {
+    return "Measurements are required";
+  }
+
+  if (
+    measurements != null &&
+    (typeof measurements !== "object" || Array.isArray(measurements))
+  ) {
+    return "Measurements must be an object";
+  }
+
+  for (const field of fields) {
+    const value =
+      measurements instanceof Map
+        ? measurements.get(field.key)
+        : measurements?.[field.key];
+
+    if (value === undefined || value === null) {
+      if (field.require) return `Measurement "${field.label}" is required`;
+      continue;
+    }
+    if (!Number.isFinite(value) || value <= 0) {
+      return `Measurement "${field.label}" must be a positive number`;
+    }
+  }
+
+  let tailoringPrice = await TailoringPrice.findOne({
+    productId: product._id,
+    sizeType,
+    isActive: true,
+  });
+  if (!tailoringPrice) {
+    tailoringPrice = await TailoringPrice.findOne({
+      productId: null,
+      sizeType,
+      isActive: true,
+    });
+  }
+  if (!tailoringPrice) return "No active tailoring price found for this size type";
+
+  return null;
+};
+
+const handleCartError = (res, error, action) => {
+  if (error.name === "CastError" || error.name === "ValidationError") {
+    return res.status(400).json({ error: "Invalid cart data" });
+  }
+  console.error(`${action} error:`, error);
+  return res.status(500).json({ error: "Internal server error" });
+};
+
 export const getCart = async (req, res) => {
   try {
-    const auth = getAuth(req);
-    const { userId } = auth;
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-    const user = await User.findOne({ clerkId: userId });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = await getCartUser(req, res);
+    if (!user) return;
 
     let cart = await Cart.findOne({ userId: user._id }).populate(
       "items.product",
-      "name images basePrice isAvailable purchaseoption masurmentConfig"
+      `${CART_PRODUCT_FIELDS} masurmentConfig`
     );
 
     if (!cart) {
@@ -27,22 +95,14 @@ export const getCart = async (req, res) => {
 
     return res.status(200).json({ success: true, cart });
   } catch (error) {
-    console.error("getCart error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return handleCartError(res, error, "getCart");
   }
 };
 
-// ──────────────────────────────────────────────
-//  ADD ITEM  (POST /api/v1/cart)
-// ──────────────────────────────────────────────
 export const addToCart = async (req, res) => {
   try {
-    const auth = getAuth(req);
-    const { userId } = auth;
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-    const user = await User.findOne({ clerkId: userId });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = await getCartUser(req, res);
+    if (!user) return;
 
     const {
       productId,
@@ -53,7 +113,6 @@ export const addToCart = async (req, res) => {
       quantity = 1,
     } = req.body;
 
-    // ── Validate product ──
     if (!productId || !purchaseOption) {
       return res
         .status(400)
@@ -66,7 +125,6 @@ export const addToCart = async (req, res) => {
       return res.status(400).json({ error: "Product is not available" });
     }
 
-    // ── Validate purchaseOption exists on this product ──
     const option = product.purchaseoption.find(
       (opt) => opt.key === purchaseOption
     );
@@ -76,61 +134,29 @@ export const addToCart = async (req, res) => {
         .json({ error: "Invalid purchase option for this product" });
     }
 
-    // ── If tailored, validate sizeType + measurements ──
-    if (option.requiremasurment) {
-      if (!tailoringSizeType) {
-        return res
-          .status(400)
-          .json({ error: "tailoringSizeType is required for this option" });
-      }
-
-      // Check tailoring price exists and is active
-      const tailoringPrice = await TailoringPrice.findOne({
-        productId: product._id,
-        sizeType: tailoringSizeType,
-        isActive: true,
-      });
-      if (!tailoringPrice) {
-        return res.status(400).json({
-          error: "No active tailoring price found for this size type",
-        });
-      }
-
-      // Validate measurements dynamically from product.masurmentConfig.field
-      const requiredFields = (product.masurmentConfig?.field || []).filter(
-        (f) => f.require
-      );
-
-      if (requiredFields.length > 0 && !measurements) {
-        return res.status(400).json({ error: "Measurements are required" });
-      }
-
-      for (const field of requiredFields) {
-        const value = measurements?.[field.key];
-        if (value === undefined || value === null) {
-          return res
-            .status(400)
-            .json({ error: `Measurement "${field.label}" is required` });
-        }
-        if (typeof value !== "number" || value <= 0) {
-          return res
-            .status(400)
-            .json({ error: `Measurement "${field.label}" must be a positive number` });
-        }
-      }
+    const parsedQuantity = parseQuantity(quantity);
+    if (parsedQuantity === null) {
+      return res.status(400).json({ error: "Quantity must be a positive integer" });
     }
 
-    // ── Find or create cart ──
+    if (option.requiremasurment) {
+      const validationError = await validateTailoring(
+        product,
+        tailoringSizeType,
+        measurements
+      );
+      if (validationError) return res.status(400).json({ error: validationError });
+    }
+
     let cart = await Cart.findOne({ userId: user._id });
     if (!cart) {
       cart = new Cart({ userId: user._id, items: [] });
     }
 
-    // ── Build cart item ──
     const cartItem = {
       product: product._id,
       purchaseOption,
-      quantity: Math.max(1, Number(quantity)),
+      quantity: parsedQuantity,
     };
 
     if (option.requiremasurment) {
@@ -143,11 +169,7 @@ export const addToCart = async (req, res) => {
     cart.items.push(cartItem);
     await cart.save();
 
-    // Populate before returning
-    await cart.populate(
-      "items.product",
-      "name images basePrice isAvailable purchaseoption"
-    );
+    await cart.populate("items.product", CART_PRODUCT_FIELDS);
 
     return res.status(200).json({
       success: true,
@@ -155,22 +177,14 @@ export const addToCart = async (req, res) => {
       cart,
     });
   } catch (error) {
-    console.error("addToCart error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return handleCartError(res, error, "addToCart");
   }
 };
 
-// ──────────────────────────────────────────────
-//  UPDATE ITEM  (PUT /api/v1/cart/:itemId)
-// ──────────────────────────────────────────────
 export const updateCartItem = async (req, res) => {
   try {
-    const auth = getAuth(req);
-    const { userId } = auth;
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-    const user = await User.findOne({ clerkId: userId });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = await getCartUser(req, res);
+    if (!user) return;
 
     const { itemId } = req.params;
     const { quantity, purchaseOption, tailoringSizeType, measurements, note } =
@@ -182,84 +196,57 @@ export const updateCartItem = async (req, res) => {
     const item = cart.items.id(itemId);
     if (!item) return res.status(404).json({ error: "Item not found in cart" });
 
-    // ── Update quantity ──
     if (quantity !== undefined) {
-      if (quantity < 1) {
-        return res.status(400).json({ error: "Quantity must be at least 1" });
+      const parsedQuantity = parseQuantity(quantity);
+      if (parsedQuantity === null) {
+        return res.status(400).json({ error: "Quantity must be a positive integer" });
       }
-      item.quantity = quantity;
+      item.quantity = parsedQuantity;
     }
 
-    // ── Update purchase option (re-validate if changed) ──
-    if (purchaseOption !== undefined) {
+    const selectionChanged =
+      purchaseOption !== undefined ||
+      tailoringSizeType !== undefined ||
+      measurements !== undefined;
+
+    if (selectionChanged) {
       const product = await Product.findById(item.product);
       if (!product) return res.status(404).json({ error: "Product not found" });
 
+      const selectedOption =
+        purchaseOption === undefined ? item.purchaseOption : purchaseOption;
       const option = product.purchaseoption.find(
-        (opt) => opt.key === purchaseOption
+        (option) => option.key === selectedOption
       );
       if (!option) {
-        return res
-          .status(400)
-          .json({ error: "Invalid purchase option for this product" });
+        return res.status(400).json({ error: "Invalid purchase option for this product" });
       }
 
-      item.purchaseOption = purchaseOption;
-
       if (option.requiremasurment) {
-        const sizeType = tailoringSizeType || item.tailoringSizeType;
-        if (!sizeType) {
-          return res
-            .status(400)
-            .json({ error: "tailoringSizeType is required for this option" });
-        }
-
-        const tailoringPrice = await TailoringPrice.findOne({
-          productId: product._id,
-          sizeType,
-          isActive: true,
-        });
-        if (!tailoringPrice) {
-          return res.status(400).json({
-            error: "No active tailoring price found for this size type",
-          });
-        }
-
-        const meas = measurements || item.measurements?.toJSON();
-        const requiredFields = (product.masurmentConfig?.field || []).filter(
-          (f) => f.require
+        const selectedSize =
+          tailoringSizeType === undefined ? item.tailoringSizeType : tailoringSizeType;
+        const selectedMeasurements =
+          measurements === undefined ? item.measurements : measurements;
+        const validationError = await validateTailoring(
+          product,
+          selectedSize,
+          selectedMeasurements
         );
+        if (validationError) return res.status(400).json({ error: validationError });
 
-        for (const field of requiredFields) {
-          const value = meas?.[field.key];
-          if (value === undefined || value === null) {
-            return res
-              .status(400)
-              .json({ error: `Measurement "${field.label}" is required` });
-          }
-          if (typeof value !== "number" || value <= 0) {
-            return res.status(400).json({
-              error: `Measurement "${field.label}" must be a positive number`,
-            });
-          }
-        }
-
-        item.tailoringSizeType = sizeType;
-        if (measurements) item.measurements = measurements;
+        item.tailoringSizeType = selectedSize;
+        item.measurements = selectedMeasurements;
       } else {
-        // Switching to non-tailored: clear tailoring data
         item.tailoringSizeType = undefined;
         item.measurements = undefined;
       }
+      item.purchaseOption = selectedOption;
     }
 
     if (note !== undefined) item.note = note;
 
     await cart.save();
-    await cart.populate(
-      "items.product",
-      "name images basePrice isAvailable purchaseoption"
-    );
+    await cart.populate("items.product", CART_PRODUCT_FIELDS);
 
     return res.status(200).json({
       success: true,
@@ -267,22 +254,14 @@ export const updateCartItem = async (req, res) => {
       cart,
     });
   } catch (error) {
-    console.error("updateCartItem error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return handleCartError(res, error, "updateCartItem");
   }
 };
 
-// ──────────────────────────────────────────────
-//  REMOVE ITEM  (DELETE /api/v1/cart/:itemId)
-// ──────────────────────────────────────────────
 export const removeFromCart = async (req, res) => {
   try {
-    const auth = getAuth(req);
-    const { userId } = auth;
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-    const user = await User.findOne({ clerkId: userId });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = await getCartUser(req, res);
+    if (!user) return;
 
     const { itemId } = req.params;
 
@@ -295,10 +274,7 @@ export const removeFromCart = async (req, res) => {
     item.deleteOne();
     await cart.save();
 
-    await cart.populate(
-      "items.product",
-      "name images basePrice isAvailable purchaseoption"
-    );
+    await cart.populate("items.product", CART_PRODUCT_FIELDS);
 
     return res.status(200).json({
       success: true,
@@ -306,22 +282,14 @@ export const removeFromCart = async (req, res) => {
       cart,
     });
   } catch (error) {
-    console.error("removeFromCart error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return handleCartError(res, error, "removeFromCart");
   }
 };
 
-// ──────────────────────────────────────────────
-//  CLEAR CART  (DELETE /api/v1/cart)
-// ──────────────────────────────────────────────
 export const clearCart = async (req, res) => {
   try {
-    const auth = getAuth(req);
-    const { userId } = auth;
-    if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-    const user = await User.findOne({ clerkId: userId });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = await getCartUser(req, res);
+    if (!user) return;
 
     const cart = await Cart.findOne({ userId: user._id });
     if (!cart) {
@@ -337,7 +305,6 @@ export const clearCart = async (req, res) => {
       cart,
     });
   } catch (error) {
-    console.error("clearCart error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return handleCartError(res, error, "clearCart");
   }
 };

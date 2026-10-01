@@ -13,6 +13,7 @@ import LandingPage from './pages/landingpage/LandingPage';
 import NotFound from './pages/notFound/NotFound';
 import { useCreateUser } from './services/userQuery';
 import Offers from './pages/dashboard/offers';
+import Tailoring from './pages/dashboard/tailoring';
 
 // Protected route component to protect dashboard access
 function ProtectedAdminRoute({ isLoaded, isSignedIn, isAdmin, children }) {
@@ -106,6 +107,7 @@ function App() {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="categories" element={<Category />} />
           <Route path="products" element={<Products />} />
+          <Route path="tailoring" element={<Tailoring />} />
           <Route path="offers" element={<Offers />} />
           <Route path="orders" element={<Orders />} />
           <Route path="shipping" element={<Shipping />} />
