@@ -19,7 +19,13 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.musdar.dukan",
-      "googleServicesFile": "./google-services .json"
+      "googleServicesFile": "./google-services .json",
+
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAw4oEATm8iy9ucuM07589oeVzTZJwdw8s"
+        }
+      }
     },
     "web": {
       "output": "static",

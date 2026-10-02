@@ -1,8 +1,10 @@
+import mongoose from "mongoose";
 import { getAuth } from "@clerk/express";
 import Cart from "../modal/cart.modal.js";
 import Product from "../modal/products.modal.js";
 import TailoringPrice from "../modal/tailoring.modal.js";
 import User from "../modal/user.modal.js";
+import Address from "../modal/address.modal.js";
 
 const CART_PRODUCT_FIELDS = "name images basePrice isAvailable purchaseoption";
 
@@ -73,10 +75,42 @@ const validateTailoring = async (product, sizeType, measurements) => {
 
 const handleCartError = (res, error, action) => {
   if (error.name === "CastError" || error.name === "ValidationError") {
-    return res.status(400).json({ error: "Invalid cart data" });
+    return res.status(400).json({ error: error.message || "Invalid cart data" });
   }
   console.error(`${action} error:`, error);
   return res.status(500).json({ error: "Internal server error" });
+};
+
+/**
+ * Helper to resolve and validate address for a user.
+ * Supports explicit addressId with validation, or auto-detecting user's default/latest address.
+ */
+const resolveAddressForUser = async (userId, addressId) => {
+  if (addressId) {
+    if (!mongoose.Types.ObjectId.isValid(addressId)) {
+      return { error: "Invalid addressId format", status: 400 };
+    }
+    const address = await Address.findOne({ _id: addressId, userId });
+    if (!address) {
+      return { error: "Address not found or does not belong to user", status: 404 };
+    }
+    return { address };
+  }
+
+  // Look for user's default address or most recent address
+  let address = await Address.findOne({ userId, isDefault: true });
+  if (!address) {
+    address = await Address.findOne({ userId }).sort({ createdAt: -1 });
+  }
+
+  if (!address) {
+    return {
+      error: "An address is required for the cart. Please provide addressId or add an address to your profile first.",
+      status: 400,
+    };
+  }
+
+  return { address };
 };
 
 export const getCart = async (req, res) => {
@@ -84,13 +118,20 @@ export const getCart = async (req, res) => {
     const user = await getCartUser(req, res);
     if (!user) return;
 
-    let cart = await Cart.findOne({ userId: user._id }).populate(
-      "items.product",
-      `${CART_PRODUCT_FIELDS} masurmentConfig`
-    );
+    let cart = await Cart.findOne({ userId: user._id })
+      .populate("addressId")
+      .populate("items.product", `${CART_PRODUCT_FIELDS} masurmentConfig`);
 
     if (!cart) {
-      cart = { userId: user._id, items: [] };
+      cart = { userId: user._id, addressId: null, items: [] };
+    } else if (!cart.addressId) {
+      // If legacy cart lacks addressId, attempt to link default address
+      const { address } = await resolveAddressForUser(user._id);
+      if (address) {
+        cart.addressId = address._id;
+        await cart.save();
+        await cart.populate("addressId");
+      }
     }
 
     return res.status(200).json({ success: true, cart });
@@ -111,6 +152,7 @@ export const addToCart = async (req, res) => {
       measurements,
       note,
       quantity = 1,
+      addressId,
     } = req.body;
 
     if (!productId || !purchaseOption) {
@@ -149,8 +191,27 @@ export const addToCart = async (req, res) => {
     }
 
     let cart = await Cart.findOne({ userId: user._id });
-    if (!cart) {
-      cart = new Cart({ userId: user._id, items: [] });
+
+    // Handle addressId validation and assignment
+    if (addressId) {
+      const { address, error, status } = await resolveAddressForUser(user._id, addressId);
+      if (error) return res.status(status).json({ error });
+
+      if (!cart) {
+        cart = new Cart({ userId: user._id, addressId: address._id, items: [] });
+      } else {
+        cart.addressId = address._id;
+      }
+    } else if (!cart) {
+      // New cart requires an address
+      const { address, error, status } = await resolveAddressForUser(user._id);
+      if (error) return res.status(status).json({ error });
+      cart = new Cart({ userId: user._id, addressId: address._id, items: [] });
+    } else if (!cart.addressId) {
+      // Existing cart missing addressId
+      const { address, error, status } = await resolveAddressForUser(user._id);
+      if (error) return res.status(status).json({ error });
+      cart.addressId = address._id;
     }
 
     const cartItem = {
@@ -169,6 +230,7 @@ export const addToCart = async (req, res) => {
     cart.items.push(cartItem);
     await cart.save();
 
+    await cart.populate("addressId");
     await cart.populate("items.product", CART_PRODUCT_FIELDS);
 
     return res.status(200).json({
@@ -181,17 +243,72 @@ export const addToCart = async (req, res) => {
   }
 };
 
+/**
+ * Update the delivery address linked to the cart
+ */
+export const updateCartAddress = async (req, res) => {
+  try {
+    const user = await getCartUser(req, res);
+    if (!user) return;
+
+    const addressId = req.body.addressId || req.params.addressId;
+    if (!addressId) {
+      return res.status(400).json({ error: "addressId is required" });
+    }
+
+    const { address, error, status } = await resolveAddressForUser(user._id, addressId);
+    if (error) return res.status(status).json({ error });
+
+    let cart = await Cart.findOne({ userId: user._id });
+    if (!cart) {
+      cart = new Cart({
+        userId: user._id,
+        addressId: address._id,
+        items: [],
+      });
+    } else {
+      cart.addressId = address._id;
+    }
+
+    await cart.save();
+    await cart.populate("addressId");
+    await cart.populate("items.product", CART_PRODUCT_FIELDS);
+
+    return res.status(200).json({
+      success: true,
+      message: "Cart address updated successfully",
+      cart,
+    });
+  } catch (error) {
+    return handleCartError(res, error, "updateCartAddress");
+  }
+};
+
 export const updateCartItem = async (req, res) => {
   try {
     const user = await getCartUser(req, res);
     if (!user) return;
 
-    const { itemId } = req.params;
-    const { quantity, purchaseOption, tailoringSizeType, measurements, note } =
-      req.body;
+    const itemId =
+      req.params.itemId && req.params.itemId !== "item"
+        ? req.params.itemId
+        : req.body.itemId || req.body._id;
+
+    const {
+      quantity,
+      purchaseOption,
+      tailoringSizeType,
+      measurements,
+      note,
+      addressId,
+    } = req.body;
 
     const cart = await Cart.findOne({ userId: user._id });
     if (!cart) return res.status(404).json({ error: "Cart not found" });
+
+    if (!itemId) {
+      return res.status(400).json({ error: "itemId is required" });
+    }
 
     const item = cart.items.id(itemId);
     if (!item) return res.status(404).json({ error: "Item not found in cart" });
@@ -199,7 +316,9 @@ export const updateCartItem = async (req, res) => {
     if (quantity !== undefined) {
       const parsedQuantity = parseQuantity(quantity);
       if (parsedQuantity === null) {
-        return res.status(400).json({ error: "Quantity must be a positive integer" });
+        return res
+          .status(400)
+          .json({ error: "Quantity must be a positive integer" });
       }
       item.quantity = parsedQuantity;
     }
@@ -219,12 +338,16 @@ export const updateCartItem = async (req, res) => {
         (option) => option.key === selectedOption
       );
       if (!option) {
-        return res.status(400).json({ error: "Invalid purchase option for this product" });
+        return res
+          .status(400)
+          .json({ error: "Invalid purchase option for this product" });
       }
 
       if (option.requiremasurment) {
         const selectedSize =
-          tailoringSizeType === undefined ? item.tailoringSizeType : tailoringSizeType;
+          tailoringSizeType === undefined
+            ? item.tailoringSizeType
+            : tailoringSizeType;
         const selectedMeasurements =
           measurements === undefined ? item.measurements : measurements;
         const validationError = await validateTailoring(
@@ -232,7 +355,8 @@ export const updateCartItem = async (req, res) => {
           selectedSize,
           selectedMeasurements
         );
-        if (validationError) return res.status(400).json({ error: validationError });
+        if (validationError)
+          return res.status(400).json({ error: validationError });
 
         item.tailoringSizeType = selectedSize;
         item.measurements = selectedMeasurements;
@@ -245,7 +369,19 @@ export const updateCartItem = async (req, res) => {
 
     if (note !== undefined) item.note = note;
 
+    if (addressId) {
+      const { address, error, status } = await resolveAddressForUser(user._id, addressId);
+      if (error) return res.status(status).json({ error });
+      cart.addressId = address._id;
+    } else if (!cart.addressId) {
+      const { address } = await resolveAddressForUser(user._id);
+      if (address) {
+        cart.addressId = address._id;
+      }
+    }
+
     await cart.save();
+    await cart.populate("addressId");
     await cart.populate("items.product", CART_PRODUCT_FIELDS);
 
     return res.status(200).json({
@@ -272,8 +408,16 @@ export const removeFromCart = async (req, res) => {
     if (!item) return res.status(404).json({ error: "Item not found in cart" });
 
     item.deleteOne();
-    await cart.save();
 
+    if (!cart.addressId) {
+      const { address } = await resolveAddressForUser(user._id);
+      if (address) {
+        cart.addressId = address._id;
+      }
+    }
+
+    await cart.save();
+    await cart.populate("addressId");
     await cart.populate("items.product", CART_PRODUCT_FIELDS);
 
     return res.status(200).json({
@@ -297,7 +441,16 @@ export const clearCart = async (req, res) => {
     }
 
     cart.items = [];
+
+    if (!cart.addressId) {
+      const { address } = await resolveAddressForUser(user._id);
+      if (address) {
+        cart.addressId = address._id;
+      }
+    }
+
     await cart.save();
+    await cart.populate("addressId");
 
     return res.status(200).json({
       success: true,

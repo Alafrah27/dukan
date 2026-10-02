@@ -43,7 +43,11 @@ export const deleteAddress = async (req, res) => {
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const address = await Address.findOne({ _id: addressId, userId });
+    const checkuser = await User.findOne({ clerkId: userId });
+    if (!checkuser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const address = await Address.findOne({ _id: addressId, userId: checkuser._id });
     if (!address) {
       return res.status(404).json({ error: "Address not found" });
     }
