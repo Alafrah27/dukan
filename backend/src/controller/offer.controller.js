@@ -1,8 +1,23 @@
 import mongoose from "mongoose";
 import Offer from "../modal/offer.modal.js";
 import Product from "../modal/products.modal.js";
+import Cloudinary from "../lib/cloudinary.js";
 
 const POPULATE_PRODUCT_FIELDS = "name images basePrice isAvailable categoryId";
+
+/**
+ * Extract Cloudinary public_id from a secure_url.
+ */
+const extractPublicId = (url) => {
+  try {
+    const parts = url.split("/upload/");
+    if (parts.length < 2) return null;
+    const afterUpload = parts[1].replace(/^v\d+\//, "");
+    return afterUpload.replace(/\.[^/.]+$/, "");
+  } catch {
+    return null;
+  }
+};
 
 const handleOfferError = (res, error, action) => {
   if (error.name === "CastError" || error.name === "ValidationError") {
@@ -17,7 +32,7 @@ const handleOfferError = (res, error, action) => {
 };
 
 /**
- * Validate offer payload values and dates
+ * Validate offer payload values and dates for one or multiple products
  */
 const validateOfferData = async ({
   productId,
@@ -27,17 +42,27 @@ const validateOfferData = async ({
   startDate,
   endDate,
 }) => {
-  if (!productId) {
-    return "يرجى تحديد المنتج الأساسي للعرض";
+  // Collect all product IDs
+  let ids = [];
+  if (Array.isArray(productsId) && productsId.length > 0) {
+    ids = productsId;
+  } else if (productId) {
+    ids = [productId];
   }
 
-  if (!mongoose.Types.ObjectId.isValid(productId)) {
-    return "معرف المنتج غير صالح";
+  if (ids.length === 0) {
+    return "يرجى تحديد منتج واحد على الأقل لتطبيق العرض عليه";
   }
 
-  const product = await Product.findById(productId);
-  if (!product) {
-    return "المنتج المحدد غير موجود";
+  for (const pId of ids) {
+    if (!mongoose.Types.ObjectId.isValid(pId)) {
+      return "أحد معرفات المنتجات المحددة غير صالح";
+    }
+  }
+
+  const existingProducts = await Product.find({ _id: { $in: ids } });
+  if (existingProducts.length === 0) {
+    return "المنتجات المحددة غير موجودة";
   }
 
   if (value === undefined || value === null || isNaN(Number(value))) {
@@ -58,8 +83,15 @@ const validateOfferData = async ({
     return "نسبة الخصم المئوية لا يمكن أن تتجاوز 100%";
   }
 
-  if (offerType === "fixed" && product.basePrice && numValue >= product.basePrice) {
-    return "مبلغ الخصم الثابت لا يمكن أن يكون أكبر من أو يساوي سعر المنتج الأصلي";
+  if (offerType === "fixed") {
+    // If fixed discount, verify it is strictly less than the lowest basePrice among all selected products
+    const minPriceProduct = existingProducts.reduce((min, p) =>
+      p.basePrice < min.basePrice ? p : min,
+      existingProducts[0]
+    );
+    if (minPriceProduct && minPriceProduct.basePrice && numValue >= minPriceProduct.basePrice) {
+      return `مبلغ الخصم الثابت (${numValue} ر.س) لا يمكن أن يكون أكبر من أو يساوي سعر المنتج (${minPriceProduct.name}: ${minPriceProduct.basePrice} ر.س)`;
+    }
   }
 
   if (!startDate) {
@@ -85,19 +117,11 @@ const validateOfferData = async ({
     return "تاريخ نهاية العرض يجب أن يكون بعد تاريخ البداية";
   }
 
-  if (productsId && Array.isArray(productsId)) {
-    for (const pId of productsId) {
-      if (!mongoose.Types.ObjectId.isValid(pId)) {
-        return "أحد معرفات المنتجات الإضافية غير صالح";
-      }
-    }
-  }
-
   return null;
 };
 
 /**
- * Create a new Offer (Admin Only)
+ * Create a new Offer (Admin Only) - Supports multiple products
  */
 export const createOffer = async (req, res) => {
   try {
@@ -105,6 +129,7 @@ export const createOffer = async (req, res) => {
       title,
       productId,
       productsId,
+      thumbnail_image,
       value,
       type = "percent",
       startDate,
@@ -125,20 +150,53 @@ export const createOffer = async (req, res) => {
       return res.status(400).json({ error: validationError });
     }
 
-    const additionalProducts =
-      Array.isArray(productsId) && productsId.length > 0
-        ? productsId
-        : [productId];
+    // Normalize products list
+    let normalizedProducts = [];
+    if (Array.isArray(productsId) && productsId.length > 0) {
+      normalizedProducts = [...new Set(productsId)]; // unique IDs
+    } else if (productId) {
+      normalizedProducts = [productId];
+    }
+
+    const primaryProductId = productId || normalizedProducts[0] || null;
+
+    // Fetch primary product for fallback thumbnail
+    const firstProduct = await Product.findById(primaryProductId);
+
+    // Upload custom thumbnail if base64 data URL provided; otherwise fallback to first product image
+    let finalThumbnail = "";
+    if (thumbnail_image && typeof thumbnail_image === "string") {
+      if (thumbnail_image.startsWith("data:image")) {
+        try {
+          const uploadRes = await Cloudinary.uploader.upload(thumbnail_image, {
+            folder: "offers",
+            resource_type: "image",
+          });
+          finalThumbnail = uploadRes.secure_url;
+        } catch (uploadError) {
+          console.error("Cloudinary offer image upload error:", uploadError);
+          return res.status(500).json({ error: "فشل رفع صورة العرض الترويجي" });
+        }
+      } else {
+        finalThumbnail = thumbnail_image;
+      }
+    }
+
+    // Default to first product's first image if no custom thumbnail image provided
+    if (!finalThumbnail && firstProduct?.images?.[0]) {
+      finalThumbnail = firstProduct.images[0];
+    }
 
     const offer = new Offer({
       userId: req.user._id,
-      productId,
-      productsId: additionalProducts,
+      productId: primaryProductId,
+      productsId: normalizedProducts,
       value: Number(value),
       type,
       startDate: new Date(startDate),
       endDate: new Date(endDate),
       title: title ? title.trim() : "",
+      thumbnail_image: finalThumbnail,
       isActive: Boolean(isActive),
     });
 
@@ -194,7 +252,7 @@ export const getOffers = async (req, res) => {
       filter.type = type;
     }
 
-    // Specific product filter
+    // Specific product filter (matches either productId or in productsId array)
     if (productId && mongoose.Types.ObjectId.isValid(productId)) {
       filter.$or = [{ productId }, { productsId: productId }];
     }
@@ -336,7 +394,7 @@ export const getOfferById = async (req, res) => {
 };
 
 /**
- * Update an existing offer (Admin Only)
+ * Update an existing offer (Admin Only) - Supports multi-product updates
  */
 export const updateOffer = async (req, res) => {
   try {
@@ -345,6 +403,7 @@ export const updateOffer = async (req, res) => {
       title,
       productId,
       productsId,
+      thumbnail_image,
       value,
       type,
       startDate,
@@ -361,7 +420,19 @@ export const updateOffer = async (req, res) => {
       return res.status(404).json({ error: "العرض غير موجود" });
     }
 
-    const targetProductId = productId || offer.productId;
+    // Determine target productsId
+    let targetProductsId = offer.productsId || [];
+    if (productsId !== undefined && Array.isArray(productsId)) {
+      targetProductsId = productsId;
+    } else if (productId !== undefined) {
+      targetProductsId = [productId];
+    }
+
+    const targetProductId =
+      productId !== undefined
+        ? productId
+        : (targetProductsId?.[0] || offer.productId);
+
     const targetValue = value !== undefined ? value : offer.value;
     const targetType = type || offer.type;
     const targetStart = startDate || offer.startDate;
@@ -369,7 +440,7 @@ export const updateOffer = async (req, res) => {
 
     const validationError = await validateOfferData({
       productId: targetProductId,
-      productsId,
+      productsId: targetProductsId,
       value: targetValue,
       type: targetType,
       startDate: targetStart,
@@ -380,14 +451,49 @@ export const updateOffer = async (req, res) => {
       return res.status(400).json({ error: validationError });
     }
 
-    if (title !== undefined) offer.title = title.trim();
-    if (productId !== undefined) offer.productId = productId;
     if (productsId !== undefined) {
-      offer.productsId =
-        Array.isArray(productsId) && productsId.length > 0
-          ? productsId
-          : [offer.productId];
+      offer.productsId = [...new Set(targetProductsId)];
+      offer.productId = targetProductId || offer.productsId[0] || null;
+    } else if (productId !== undefined) {
+      offer.productId = productId;
+      if (!offer.productsId?.some((id) => id.toString() === productId.toString())) {
+        offer.productsId.push(productId);
+      }
     }
+
+    // Handle thumbnail_image update
+    if (thumbnail_image !== undefined) {
+      if (thumbnail_image && typeof thumbnail_image === "string" && thumbnail_image.startsWith("data:image")) {
+        try {
+          const uploadRes = await Cloudinary.uploader.upload(thumbnail_image, {
+            folder: "offers",
+            resource_type: "image",
+          });
+
+          // Delete old image from Cloudinary if stored in offers folder
+          if (offer.thumbnail_image && offer.thumbnail_image.includes("/offers/")) {
+            const publicId = extractPublicId(offer.thumbnail_image);
+            if (publicId) await Cloudinary.uploader.destroy(publicId);
+          }
+
+          offer.thumbnail_image = uploadRes.secure_url;
+        } catch (uploadError) {
+          console.error("Cloudinary offer image update error:", uploadError);
+          return res.status(500).json({ error: "فشل رفع صورة العرض الجديدة" });
+        }
+      } else if (thumbnail_image) {
+        offer.thumbnail_image = thumbnail_image;
+      } else {
+        // Fallback to primary product image
+        const targetProduct = await Product.findById(offer.productId || offer.productsId?.[0]);
+        offer.thumbnail_image = targetProduct?.images?.[0] || "";
+      }
+    } else if (!offer.thumbnail_image) {
+      const targetProduct = await Product.findById(offer.productId || offer.productsId?.[0]);
+      offer.thumbnail_image = targetProduct?.images?.[0] || "";
+    }
+
+    if (title !== undefined) offer.title = title.trim();
     if (value !== undefined) offer.value = Number(value);
     if (type !== undefined) offer.type = type;
     if (startDate !== undefined) offer.startDate = new Date(startDate);
@@ -429,6 +535,7 @@ export const toggleOfferStatus = async (req, res) => {
     await offer.save();
 
     await offer.populate("productId", POPULATE_PRODUCT_FIELDS);
+    await offer.populate("productsId", POPULATE_PRODUCT_FIELDS);
 
     return res.status(200).json({
       success: true,
@@ -454,6 +561,18 @@ export const deleteOffer = async (req, res) => {
     const offer = await Offer.findById(offerId);
     if (!offer) {
       return res.status(404).json({ error: "العرض غير موجود" });
+    }
+
+    // Delete thumbnail from Cloudinary if hosted in offers folder
+    if (offer.thumbnail_image && offer.thumbnail_image.includes("/offers/")) {
+      const publicId = extractPublicId(offer.thumbnail_image);
+      if (publicId) {
+        try {
+          await Cloudinary.uploader.destroy(publicId);
+        } catch (e) {
+          console.error("Error deleting offer thumbnail from Cloudinary:", e);
+        }
+      }
     }
 
     await Offer.findByIdAndDelete(offerId);

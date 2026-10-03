@@ -11,12 +11,8 @@ const offerSchema = new Schema(
     productId: {
       type: Schema.Types.ObjectId,
       ref: "Product",
-      required: true,
-    },
-    value: {
-      type: Number,
-      required: true,
-      min: 0,
+      // Optional: acts as the primary/featured product if multiple products are in productsId
+      default: null,
     },
     productsId: [
       {
@@ -24,6 +20,11 @@ const offerSchema = new Schema(
         ref: "Product",
       },
     ],
+    value: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
     type: {
       type: String,
       required: true,
@@ -43,6 +44,10 @@ const offerSchema = new Schema(
       default: "",
       trim: true,
     },
+    thumbnail_image: {
+      type: String,
+      default: "",
+    },
     isActive: {
       type: Boolean,
       default: true,
@@ -52,6 +57,7 @@ const offerSchema = new Schema(
 );
 
 offerSchema.index({ productId: 1 });
+offerSchema.index({ productsId: 1 });
 offerSchema.index({ startDate: 1, endDate: 1 });
 offerSchema.index({ isActive: 1 });
 

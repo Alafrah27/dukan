@@ -16,9 +16,13 @@ import {
   Sparkles,
   ToggleLeft,
   ToggleRight,
-  TrendingDown,
+  ImagePlus,
+  ImageIcon,
+  X,
+  Check,
+  CheckSquare,
+  Square,
   Layers,
-  ArrowUpDown,
 } from "lucide-react";
 import {
   useGetOffers,
@@ -31,6 +35,7 @@ import { useGetProducts } from "../../services/productQuery";
 import Overly from "../../components/Overly";
 import ActionMenu from "../../components/ActionMenu";
 import DataTable from "../../components/DataTable";
+import readFileAsDataUrl from "../../lib/readFileUrl";
 import showToast from "../../lib/toast";
 import { currencyFormate } from "../../lib/currencyformate";
 
@@ -111,8 +116,25 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
   const isEditing = !!initialData;
 
   const [title, setTitle] = useState(initialData?.title || "");
-  const [productId, setProductId] = useState(
-    initialData?.productId?._id || initialData?.productId || ""
+
+  // Multi-Product Selection State
+  const [selectedProductIds, setSelectedProductIds] = useState(() => {
+    if (
+      initialData?.productsId &&
+      Array.isArray(initialData.productsId) &&
+      initialData.productsId.length > 0
+    ) {
+      return initialData.productsId.map((p) => p._id || p);
+    }
+    if (initialData?.productId) {
+      const pId = initialData.productId._id || initialData.productId;
+      return [pId];
+    }
+    return [];
+  });
+
+  const [thumbnailImage, setThumbnailImage] = useState(
+    initialData?.thumbnail_image || ""
   );
   const [value, setValue] = useState(initialData?.value ?? "");
   const [type, setType] = useState(initialData?.type || "percent");
@@ -129,23 +151,77 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
   const [isActive, setIsActive] = useState(initialData?.isActive ?? true);
   const [productSearch, setProductSearch] = useState("");
 
-  // Selected product object
-  const selectedProduct = useMemo(() => {
-    return products.find((p) => p._id === productId);
-  }, [products, productId]);
+  // Selected products objects
+  const selectedProducts = useMemo(() => {
+    return products.filter((p) => selectedProductIds.includes(p._id));
+  }, [products, selectedProductIds]);
 
-  // Filtered products for dropdown
+  // Active preview image (custom thumbnail OR fallback to first selected product's image)
+  const currentPreviewImage = useMemo(() => {
+    if (thumbnailImage) return thumbnailImage;
+    return selectedProducts[0]?.images?.[0] || "";
+  }, [thumbnailImage, selectedProducts]);
+
+  // Filtered products for multi-select list
   const filteredProducts = useMemo(() => {
     if (!productSearch.trim()) return products;
     const q = productSearch.toLowerCase();
     return products.filter((p) => p.name?.toLowerCase().includes(q));
   }, [products, productSearch]);
 
-  // Calculated preview price
-  const previewDiscountedPrice = useMemo(() => {
-    if (!selectedProduct?.basePrice || !value) return null;
-    return calculateDiscountedPrice(selectedProduct.basePrice, value, type);
-  }, [selectedProduct, value, type]);
+  // Toggle individual product selection
+  const toggleProductSelection = (id) => {
+    setSelectedProductIds((prev) =>
+      prev.includes(id) ? prev.filter((pId) => pId !== id) : [...prev, id]
+    );
+  };
+
+  // Select all / Deselect all
+  const handleToggleSelectAll = () => {
+    if (selectedProductIds.length === filteredProducts.length) {
+      setSelectedProductIds([]);
+    } else {
+      const allFilteredIds = filteredProducts.map((p) => p._id);
+      setSelectedProductIds((prev) => [
+        ...new Set([...prev, ...allFilteredIds]),
+      ]);
+    }
+  };
+
+  // Remove single chip
+  const handleRemoveProductChip = (id, e) => {
+    e?.stopPropagation();
+    setSelectedProductIds((prev) => prev.filter((pId) => pId !== id));
+  };
+
+  // Handle custom banner image upload
+  const handleImageChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      showToast.error("يرجى اختيار ملف صورة صالح (PNG, JPG, WebP)");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showToast.error("حجم الصورة يجب أن يكون أقل من 5 ميغابايت");
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setThumbnailImage(dataUrl);
+      showToast.success("تم اختيار صورة البانر بنجاح");
+    } catch {
+      showToast.error("فشل قراءة ملف الصورة");
+    }
+  };
+
+  // Reset to product image
+  const handleResetToProductImage = () => {
+    setThumbnailImage("");
+    showToast.info("تمت استعادة الصورة الافتراضية للمنتج");
+  };
 
   // Apply Quick Date Range Presets
   const applyPresetDays = (days) => {
@@ -158,8 +234,8 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
   const handleSubmit = (e) => {
     e.preventDefault();
 
-    if (!productId) {
-      showToast.error("يرجى اختيار المنتج المراد تطبيق العرض عليه");
+    if (selectedProductIds.length === 0) {
+      showToast.error("يرجى اختيار منتج واحد على الأقل لتطبيق العرض عليه");
       return;
     }
     if (!value || Number(value) <= 0) {
@@ -170,13 +246,20 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
       showToast.error("نسبة الخصم المئوية لا يمكن أن تتجاوز 100%");
       return;
     }
-    if (
-      type === "fixed" &&
-      selectedProduct?.basePrice &&
-      Number(value) >= selectedProduct.basePrice
-    ) {
-      showToast.error("قيمة الخصم الثابت يجب أن تكون أقل من سعر المنتج الأصلي");
-      return;
+    if (type === "fixed") {
+      const minPriceProduct = selectedProducts.reduce(
+        (min, p) => (p.basePrice < min.basePrice ? p : min),
+        selectedProducts[0]
+      );
+      if (
+        minPriceProduct?.basePrice &&
+        Number(value) >= minPriceProduct.basePrice
+      ) {
+        showToast.error(
+          `قيمة الخصم الثابت (${value} ر.س) يجب أن تكون أقل من سعر المنتج الأصلي (${minPriceProduct.name}: ${minPriceProduct.basePrice} ر.س)`
+        );
+        return;
+      }
     }
     if (!startDate) {
       showToast.error("يرجى تحديد تاريخ بداية العرض");
@@ -193,8 +276,10 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
 
     const payload = {
       title: title.trim(),
-      productId,
-      productsId: [productId],
+      productId: selectedProductIds[0],
+      productsId: selectedProductIds,
+      thumbnail_image:
+        thumbnailImage || selectedProducts[0]?.images?.[0] || "",
       value: Number(value),
       type,
       startDate: new Date(startDate).toISOString(),
@@ -220,81 +305,232 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="مثال: خصم الصيف الحصري، عرض نهاية الأسبوع..."
+          placeholder="مثال: خصم الصيف الحصري، عرض نهاية الأسبوع، باقة الثياب..."
           className="w-full px-3.5 py-2.5 rounded-xl border border-primary/15 bg-white text-text text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
         />
       </div>
 
-      {/* Product Selection */}
+      {/* ─── Multi-Product Selection Section ─── */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="text-xs font-bold text-text flex items-center gap-1.5">
+            <Layers size={14} className="text-primary" />
+            <span>المنتجات المشمولة بالعرض</span>
+            <span className="text-rose-500">*</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-lg">
+              تم تحديد {selectedProductIds.length} من {products.length}
+            </span>
+            {filteredProducts.length > 0 && (
+              <button
+                type="button"
+                onClick={handleToggleSelectAll}
+                className="text-[11px] text-primary hover:underline font-semibold cursor-pointer"
+              >
+                {selectedProductIds.length === filteredProducts.length
+                  ? "إلغاء تحديد الكل"
+                  : "تحديد الكل"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Selected Products Chips Bar */}
+        {selectedProducts.length > 0 && (
+          <div className="mb-2.5 flex flex-wrap gap-1.5 p-2 rounded-xl bg-surface/50 border border-primary/10 max-h-24 overflow-y-auto custom-scrollbar">
+            {selectedProducts.map((p) => (
+              <span
+                key={p._id}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-primary/15 text-[11px] font-semibold text-text shadow-2xs"
+              >
+                {p.images?.[0] && (
+                  <img
+                    src={p.images[0]}
+                    alt={p.name}
+                    className="h-4 w-4 rounded-md object-cover"
+                  />
+                )}
+                <span className="truncate max-w-[120px]">{p.name}</span>
+                <button
+                  type="button"
+                  onClick={(e) => handleRemoveProductChip(p._id, e)}
+                  className="text-textSecondary hover:text-rose-500 p-0.5 transition-colors cursor-pointer"
+                  title="إزالة"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Search Inside Product Selection */}
+        <div className="relative mb-2">
+          <Search
+            size={14}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-textSecondary"
+          />
+          <input
+            type="text"
+            value={productSearch}
+            onChange={(e) => setProductSearch(e.target.value)}
+            placeholder="ابحث بالاسم لتحديد منتجات إضافية..."
+            className="w-full pr-8 pl-3 py-1.5 text-xs rounded-xl border border-primary/15 bg-white text-text focus:outline-none focus:border-primary shadow-2xs"
+          />
+        </div>
+
+        {/* Scrollable Products List with Multi-select Checkboxes */}
+        <div className="border border-primary/15 rounded-2xl overflow-hidden bg-white max-h-56 overflow-y-auto custom-scrollbar divide-y divide-primary/5">
+          {filteredProducts.length === 0 ? (
+            <div className="py-6 text-center text-xs text-textSecondary">
+              لا توجد منتجات مطابقة لعملية البحث
+            </div>
+          ) : (
+            filteredProducts.map((product) => {
+              const isSelected = selectedProductIds.includes(product._id);
+              return (
+                <div
+                  key={product._id}
+                  onClick={() => toggleProductSelection(product._id)}
+                  className={`flex items-center justify-between p-2.5 cursor-pointer transition-colors ${
+                    isSelected
+                      ? "bg-primary/8 border-l-4 border-l-primary"
+                      : "hover:bg-surface/40"
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    {/* Checkbox indicator */}
+                    <div
+                      className={`h-5 w-5 rounded-md flex items-center justify-center border transition-all ${
+                        isSelected
+                          ? "bg-primary border-primary text-white"
+                          : "border-primary/25 bg-white"
+                      }`}
+                    >
+                      {isSelected && <Check size={13} strokeWidth={3} />}
+                    </div>
+
+                    {/* Thumbnail */}
+                    <div className="h-9 w-9 rounded-lg overflow-hidden bg-surface/40 border border-primary/10 shrink-0">
+                      {product.images?.[0] ? (
+                        <img
+                          src={product.images[0]}
+                          alt={product.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center text-primary/30">
+                          <Package size={16} />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Details */}
+                    <div className="min-w-0">
+                      <span className="text-xs font-bold text-text truncate block">
+                        {product.name}
+                      </span>
+                      <span className="text-[10px] text-textSecondary block">
+                        {currencyFormate(product.basePrice || 0)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                      isSelected
+                        ? "bg-primary text-white"
+                        : "text-textSecondary/60"
+                    }`}
+                  >
+                    {isSelected ? "محدد" : "إضافة"}
+                  </span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* ─── Promotional Thumbnail / Banner Section ─── */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <label className="text-xs font-bold text-text">
-            المنتج المراد تطبيق الخصم عليه <span className="text-rose-500">*</span>
+            صورة البانر الترويجي للعرض (Thumbnail)
           </label>
-          <span className="text-[11px] text-textSecondary">
-            {filteredProducts.length} منتج متاح
-          </span>
+          {thumbnailImage && (
+            <button
+              type="button"
+              onClick={handleResetToProductImage}
+              className="text-[11px] text-rose-500 hover:underline inline-flex items-center gap-1 cursor-pointer"
+            >
+              <X size={12} />
+              <span>استعادة صورة أول منتج</span>
+            </button>
+          )}
         </div>
 
-        {/* Search inside product dropdown if more than 5 products */}
-        {products.length > 5 && (
-          <div className="relative mb-2">
-            <Search
-              size={14}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-textSecondary"
-            />
-            <input
-              type="text"
-              value={productSearch}
-              onChange={(e) => setProductSearch(e.target.value)}
-              placeholder="ابحث عن منتج..."
-              className="w-full pr-8 pl-3 py-1.5 text-xs rounded-lg border border-primary/15 bg-surface/30 focus:outline-none focus:border-primary"
-            />
-          </div>
-        )}
-
-        <select
-          value={productId}
-          onChange={(e) => setProductId(e.target.value)}
-          className="w-full px-3.5 py-2.5 rounded-xl border border-primary/15 bg-white text-text text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer"
-        >
-          <option value="">-- اختر منتجاً من القائمة --</option>
-          {filteredProducts.map((p) => (
-            <option key={p._id} value={p._id}>
-              {p.name} — ({currencyFormate(p.basePrice || 0)})
-            </option>
-          ))}
-        </select>
-
-        {/* Selected Product Preview Card */}
-        {selectedProduct && (
-          <div className="mt-2.5 flex items-center gap-3 p-2.5 rounded-xl bg-surface/50 border border-primary/10">
-            <div className="h-11 w-11 rounded-lg overflow-hidden bg-white shrink-0 border border-primary/10">
-              {selectedProduct.images?.[0] ? (
+        <div className="flex flex-col sm:flex-row items-center gap-4 p-3.5 rounded-2xl border border-primary/10 bg-surface/30">
+          {/* Banner Preview Box */}
+          <div className="relative w-full sm:w-48 h-28 rounded-xl overflow-hidden bg-white border border-primary/15 flex items-center justify-center shrink-0 group">
+            {currentPreviewImage ? (
+              <>
                 <img
-                  src={selectedProduct.images[0]}
-                  alt={selectedProduct.name}
-                  className="h-full w-full object-cover"
+                  src={currentPreviewImage}
+                  alt="معاينة البانر"
+                  className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
                 />
-              ) : (
-                <div className="h-full w-full flex items-center justify-center text-primary/40">
-                  <Package size={18} />
-                </div>
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <span className="text-xs font-bold text-text truncate block">
-                {selectedProduct.name}
-              </span>
-              <span className="text-[11px] text-textSecondary font-semibold">
-                السعر الأساسي: {currencyFormate(selectedProduct.basePrice || 0)}
-              </span>
+                <label
+                  htmlFor="offer-thumbnail-upload"
+                  className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white text-xs font-bold gap-1.5"
+                >
+                  <Pencil size={16} />
+                  <span>تغيير</span>
+                </label>
+              </>
+            ) : (
+              <div className="flex flex-col items-center gap-1 text-primary/40">
+                <ImageIcon size={26} />
+                <span className="text-[10px] font-semibold">لا توجد صورة</span>
+              </div>
+            )}
+          </div>
+
+          {/* Upload Controls & Tip */}
+          <div className="flex-1 space-y-2 text-right">
+            <p className="text-xs text-text font-semibold">
+              {thumbnailImage
+                ? "تم تحديد صورة مخصصة للبانر"
+                : selectedProducts[0]?.images?.[0]
+                ? "يتم استخدام صورة المنتج الأول تلقائياً كبانر افتراضي"
+                : "يمكنك رفع بانر ترويجي مخصص أو اختيار منتجات لها صور"}
+            </p>
+            <p className="text-[11px] text-textSecondary leading-relaxed">
+              تظهر هذه الصورة في بانرات التطبيق الرئيسية وتفتح قائمة المنتجات المشمولة. يفضل نسبة 16:9 أو 2:1.
+            </p>
+
+            <div className="pt-1">
+              <label
+                htmlFor="offer-thumbnail-upload"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-primary/20 bg-white text-primary text-xs font-bold hover:bg-primary/5 transition-colors cursor-pointer"
+              >
+                <ImagePlus size={14} />
+                <span>{thumbnailImage ? "رفع صورة بديلة" : "رفع بانر مخصص"}</span>
+              </label>
+              <input
+                id="offer-thumbnail-upload"
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                className="hidden"
+              />
             </div>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Discount Type & Value */}
+      {/* ─── Discount Type & Value ─── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
         {/* Type */}
         <div>
@@ -352,33 +588,54 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
         </div>
       </div>
 
-      {/* Live Calculation Preview */}
-      {selectedProduct && previewDiscountedPrice !== null && (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-emerald-800">
-            <Sparkles size={18} className="text-emerald-600 shrink-0" />
-            <div>
-              <span className="text-[11px] font-bold block">معاينة السعر بعد الخصم:</span>
-              <span className="text-xs text-emerald-700">
-                توفير{" "}
-                {currencyFormate(
-                  selectedProduct.basePrice - previewDiscountedPrice
-                )}
+      {/* ─── Live Calculation Preview ─── */}
+      {selectedProducts.length > 0 && value && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 text-emerald-800">
+              <Sparkles size={18} className="text-emerald-600 shrink-0" />
+              <span className="text-xs font-bold">
+                معاينة الخصم على {selectedProducts.length} منتج محدد:
               </span>
             </div>
+            <span className="text-xs font-black text-emerald-700 bg-white px-2 py-0.5 rounded-md border border-emerald-200">
+              {type === "percent" ? `${value}% خصم` : `${value} ر.س خصم`}
+            </span>
           </div>
-          <div className="text-left">
-            <span className="text-[11px] text-textSecondary line-through block">
-              {currencyFormate(selectedProduct.basePrice)}
-            </span>
-            <span className="text-sm font-black text-emerald-700 block">
-              {currencyFormate(previewDiscountedPrice)}
-            </span>
+
+          {/* Quick list of discounted sample prices */}
+          <div className="space-y-1.5 max-h-28 overflow-y-auto custom-scrollbar">
+            {selectedProducts.slice(0, 3).map((p) => {
+              const discounted = calculateDiscountedPrice(p.basePrice, value, type);
+              return (
+                <div
+                  key={p._id}
+                  className="flex items-center justify-between text-xs bg-white/70 px-2.5 py-1 rounded-lg"
+                >
+                  <span className="font-semibold text-text truncate max-w-[180px]">
+                    {p.name}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-textSecondary line-through text-[11px]">
+                      {currencyFormate(p.basePrice || 0)}
+                    </span>
+                    <span className="font-bold text-emerald-700">
+                      {currencyFormate(discounted)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            {selectedProducts.length > 3 && (
+              <span className="text-[10px] text-emerald-800 block text-center font-semibold pt-0.5">
+                + {selectedProducts.length - 3} منتجات أخرى مشمولة بنفس الخصم
+              </span>
+            )}
           </div>
         </div>
       )}
 
-      {/* Date Range & Presets */}
+      {/* ─── Date Range & Presets ─── */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <label className="text-xs font-bold text-text">
@@ -389,21 +646,21 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
             <button
               type="button"
               onClick={() => applyPresetDays(3)}
-              className="px-2 py-0.5 text-[10px] rounded-md bg-surface text-primary hover:bg-primary/10 transition-colors"
+              className="px-2 py-0.5 text-[10px] rounded-md bg-surface text-primary hover:bg-primary/10 transition-colors cursor-pointer"
             >
               3 أيام
             </button>
             <button
               type="button"
               onClick={() => applyPresetDays(7)}
-              className="px-2 py-0.5 text-[10px] rounded-md bg-surface text-primary hover:bg-primary/10 transition-colors"
+              className="px-2 py-0.5 text-[10px] rounded-md bg-surface text-primary hover:bg-primary/10 transition-colors cursor-pointer"
             >
               أسبوع
             </button>
             <button
               type="button"
               onClick={() => applyPresetDays(30)}
-              className="px-2 py-0.5 text-[10px] rounded-md bg-surface text-primary hover:bg-primary/10 transition-colors"
+              className="px-2 py-0.5 text-[10px] rounded-md bg-surface text-primary hover:bg-primary/10 transition-colors cursor-pointer"
             >
               شهر
             </button>
@@ -436,7 +693,7 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
         </div>
       </div>
 
-      {/* Active Toggle Switch */}
+      {/* ─── Active Toggle Switch ─── */}
       <div className="flex items-center justify-between p-3 rounded-xl border border-primary/10 bg-surface/30">
         <div>
           <span className="text-xs font-bold text-text block">تفعيل العرض فوراً</span>
@@ -459,7 +716,7 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
         </button>
       </div>
 
-      {/* Submit Button */}
+      {/* ─── Submit Button ─── */}
       <button
         type="submit"
         disabled={isLoading}
@@ -483,51 +740,63 @@ const OfferForm = ({ initialData, products = [], onSubmit, isLoading }) => {
 /* ─────────────────────────────────────────────
    Delete Confirmation Dialog (Inside Overly)
 ───────────────────────────────────────────── */
-const DeleteConfirm = ({ offer, onConfirm, onCancel, isLoading }) => (
-  <div className="text-center space-y-4 font-cairo text-right" dir="rtl">
-    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 text-rose-600">
-      <Trash2 size={28} />
-    </div>
+const DeleteConfirm = ({ offer, onConfirm, onCancel, isLoading }) => {
+  const previewImg =
+    offer?.thumbnail_image ||
+    offer?.productId?.images?.[0] ||
+    offer?.productsId?.[0]?.images?.[0] ||
+    "";
 
-    {offer?.productId?.images?.[0] && (
-      <img
-        src={offer.productId.images[0]}
-        alt={offer.productId?.name || "معاينة"}
-        className="w-16 h-16 rounded-xl object-cover mx-auto border border-primary/10 shadow-xs"
-      />
-    )}
+  const productCount =
+    offer?.productsId?.length || (offer?.productId ? 1 : 0);
 
-    <div>
-      <h3 className="text-base font-bold text-text text-center">تأكيد حذف العرض</h3>
-      <p className="mt-1 text-xs text-textSecondary text-center">
-        هل أنت متأكد من حذف العرض الترويجي على المنتج{" "}
-        <strong className="text-text font-bold">
-          "{offer?.productId?.name || offer?.title || "العرض"}"
-        </strong>
-        ؟ لا يمكن التراجع عن هذا الإجراء.
-      </p>
-    </div>
+  return (
+    <div className="text-center space-y-4 font-cairo text-right" dir="rtl">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 text-rose-600">
+        <Trash2 size={28} />
+      </div>
 
-    <div className="flex gap-2.5 pt-2">
-      <button
-        type="button"
-        onClick={onCancel}
-        disabled={isLoading}
-        className="flex-1 py-2 rounded-xl border border-primary/15 text-textSecondary text-xs font-semibold hover:bg-surface transition-colors cursor-pointer disabled:opacity-50"
-      >
-        إلغاء
-      </button>
-      <button
-        type="button"
-        onClick={onConfirm}
-        disabled={isLoading}
-        className="flex-1 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 disabled:opacity-50 transition-colors cursor-pointer"
-      >
-        {isLoading ? "جارٍ الحذف..." : "حذف العرض"}
-      </button>
+      {previewImg && (
+        <img
+          src={previewImg}
+          alt={offer?.title || "معاينة"}
+          className="w-24 h-16 rounded-xl object-cover mx-auto border border-primary/10 shadow-xs"
+        />
+      )}
+
+      <div>
+        <h3 className="text-base font-bold text-text text-center">تأكيد حذف العرض</h3>
+        <p className="mt-1 text-xs text-textSecondary text-center leading-relaxed">
+          هل أنت متأكد من حذف العرض الترويجي{" "}
+          <strong className="text-text font-bold">
+            "{offer?.title || offer?.productId?.name || "العرض"}"
+          </strong>
+          {productCount > 1 ? ` المطبق على ${productCount} منتجات` : ""}؟
+          سيتم حذف أي بانر مخصص مرتبط بهذا العرض ولا يمكن التراجع عن هذا الإجراء.
+        </p>
+      </div>
+
+      <div className="flex gap-2.5 pt-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isLoading}
+          className="flex-1 py-2 rounded-xl border border-primary/15 text-textSecondary text-xs font-semibold hover:bg-surface transition-colors cursor-pointer disabled:opacity-50"
+        >
+          إلغاء
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={isLoading}
+          className="flex-1 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 disabled:opacity-50 transition-colors cursor-pointer"
+        >
+          {isLoading ? "جارٍ الحذف..." : "حذف العرض"}
+        </button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /* ─────────────────────────────────────────────
    Main Offers Dashboard Page
@@ -642,32 +911,63 @@ function Offers() {
     () => [
       {
         key: "product",
-        label: "المنتج والعرض",
+        label: "بانر العرض والمنتجات المشمولة",
         render: (offer) => {
-          const product = offer.productId;
+          const productsList =
+            offer.productsId && offer.productsId.length > 0
+              ? offer.productsId
+              : offer.productId
+              ? [offer.productId]
+              : [];
+
+          const primaryProduct = productsList[0] || offer.productId;
+          const displayImage =
+            offer.thumbnail_image || primaryProduct?.images?.[0] || "";
+
           return (
             <div className="flex items-center gap-3">
-              <div className="h-11 w-11 rounded-xl overflow-hidden bg-surface/50 border border-primary/10 flex items-center justify-center shrink-0">
-                {product?.images?.[0] ? (
+              {/* Thumbnail / Banner Visual */}
+              <div className="relative h-12 w-16 rounded-xl overflow-hidden bg-surface/50 border border-primary/10 flex items-center justify-center shrink-0 group">
+                {displayImage ? (
                   <img
-                    src={product.images[0]}
-                    alt={product.name}
-                    className="h-full w-full object-cover transition-transform duration-200 hover:scale-110"
+                    src={displayImage}
+                    alt={primaryProduct?.name || "بانر"}
+                    className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-110"
                   />
                 ) : (
                   <Package size={20} className="text-primary/40" />
                 )}
-              </div>
-              <div className="min-w-0">
-                <span className="font-bold text-text text-xs block truncate max-w-[200px]">
-                  {product?.name || "منتج غير متوفر"}
-                </span>
-                {offer.title && (
-                  <span className="text-[11px] text-primary font-semibold block truncate max-w-[200px]">
-                    {offer.title}
+                {offer.thumbnail_image && (
+                  <span className="absolute bottom-0.5 right-0.5 bg-black/60 text-[9px] text-white px-1 py-0.2 rounded font-semibold">
+                    بانر
                   </span>
                 )}
-                <span className="text-[10px] text-textSecondary font-mono block" dir="ltr">
+              </div>
+
+              {/* Text Info & Multi-product Badge */}
+              <div className="min-w-0">
+                {offer.title ? (
+                  <span className="font-bold text-text text-xs block truncate max-w-[200px]">
+                    {offer.title}
+                  </span>
+                ) : null}
+
+                {productsList.length > 1 ? (
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[11px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md shrink-0">
+                      {productsList.length} منتجات مشمولة
+                    </span>
+                    <span className="text-[10px] text-textSecondary truncate max-w-[130px]">
+                      ({productsList.map((p) => p.name).filter(Boolean).slice(0, 2).join("، ")}...)
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-[11px] text-textSecondary font-semibold block truncate max-w-[200px]">
+                    {primaryProduct?.name || "منتج غير متوفر"}
+                  </span>
+                )}
+
+                <span className="text-[10px] text-textSecondary/70 font-mono block mt-0.5" dir="ltr">
                   ID: {offer._id?.slice(0, 8)}...
                 </span>
               </div>
@@ -694,7 +994,28 @@ function Offers() {
         key: "price",
         label: "السعر بعد الخصم",
         render: (offer) => {
-          const basePrice = offer.productId?.basePrice || 0;
+          const productsList =
+            offer.productsId && offer.productsId.length > 0
+              ? offer.productsId
+              : offer.productId
+              ? [offer.productId]
+              : [];
+
+          if (productsList.length > 1) {
+            return (
+              <div>
+                <span className="text-xs font-bold text-emerald-700 block">
+                  خصم {offer.type === "percent" ? `${offer.value}%` : `${offer.value} ر.س`}
+                </span>
+                <span className="text-[10px] text-textSecondary block">
+                  مطبق على {productsList.length} منتجات
+                </span>
+              </div>
+            );
+          }
+
+          const basePrice =
+            productsList[0]?.basePrice || offer.productId?.basePrice || 0;
           const discounted = calculateDiscountedPrice(
             basePrice,
             offer.value,
@@ -749,7 +1070,7 @@ function Offers() {
                 type="button"
                 onClick={() => handleToggle(offer)}
                 disabled={toggleMutation.isPending}
-                className="text-textSecondary hover:text-primary p-1 rounded-md transition-colors"
+                className="text-textSecondary hover:text-primary p-1 rounded-md transition-colors cursor-pointer"
                 title={offer.isActive ? "تعطيل العرض" : "تفعيل العرض"}
               >
                 {offer.isActive ? (
@@ -801,7 +1122,7 @@ function Offers() {
         <div>
           <h1 className="text-2xl font-bold text-text">العروض والخصومات</h1>
           <p className="mt-1 text-xs text-textSecondary">
-            إدارة الحملات الترويجية ونسب الخصم على المنتجات في المتجر
+            إدارة الحملات الترويجية والبانرات ونسب الخصم على منتج واحد أو عدة منتجات
           </p>
         </div>
 
@@ -916,7 +1237,7 @@ function Offers() {
                   setDebouncedSearch("");
                   setPage(1);
                 }}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-textSecondary hover:text-rose-500 text-xs"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-textSecondary hover:text-rose-500 text-xs cursor-pointer"
               >
                 مسح
               </button>
@@ -991,7 +1312,7 @@ function Offers() {
         isOpen={overlay.type === "form"}
         onClose={closeOverlay}
         title={overlay.data ? "تعديل العرض الترويجي" : "إضافة عرض ترويجي جديد"}
-        maxWidth="max-w-lg"
+        maxWidth="max-w-xl"
       >
         <OfferForm
           initialData={overlay.data}
