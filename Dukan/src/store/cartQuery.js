@@ -52,6 +52,23 @@ export const useUpdateCartItem = () => {
 };
 
 /**
+ * Hook to update cart address
+ */
+export const useUpdateCartAddress = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (addressId) => {
+      const response = await api.put("/cart/address", { addressId });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [CART_QUERY_KEY] });
+    },
+  });
+};
+
+/**
  * Hook to delete item from cart
  */
 export const useRemoveCartItem = () => {

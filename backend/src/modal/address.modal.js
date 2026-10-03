@@ -14,6 +14,10 @@ const addressSchema = new Schema(
       street1: String,
     },
     phonenumber: String,
+    isDefault: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true },
 );

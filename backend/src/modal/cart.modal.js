@@ -38,6 +38,11 @@ const cartSchema = new Schema(
       required: true,
       index: true,
     },
+    addressId : {
+      type : Schema.Types.ObjectId,
+      ref : "Address",
+      required : true,
+    },
     items: [cartItemSchema],
   },
   { timestamps: true }
