@@ -1,41 +1,26 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   ScrollView,
-  Modal,
-  Platform,
   ActivityIndicator,
   Alert,
   Share,
-  Dimensions,
-  KeyboardAvoidingView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as Location from "expo-location";
-import { GoogleMaps, AppleMaps } from "expo-maps";
 import {
   ArrowRight,
   ChevronLeft,
-  Search,
   Plus,
   MapPin,
-  Navigation,
   Home,
   Briefcase,
   MoreVertical,
   Share2,
   CheckCircle2,
-  Check,
-  X,
-  Trash2,
-  Edit3,
-  Star,
-  Phone,
-  User,
 } from "lucide-react-native";
 import Toast from "react-native-toast-message";
 import { Colors } from "../constants/Colors";
@@ -49,8 +34,9 @@ import {
 } from "../store/addressQuery";
 import { useUpdateCartAddress } from "../store/cartQuery";
 import { useUser } from "@clerk/expo";
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+import AddressMapModal from "../components/customer/address/AddressMapModal";
+import AddressDetailsModal from "../components/customer/address/AddressDetailsModal";
+import AddressActionsModal from "../components/customer/address/AddressActionsModal";
 
 // Default Riyadh Center Coordinates
 const DEFAULT_COORDS = {
@@ -58,7 +44,16 @@ const DEFAULT_COORDS = {
   longitude: 46.6753,
 };
 
-const MapComponent = Platform.OS === "ios" ? AppleMaps.View : GoogleMaps.View;
+const EMPTY_LOCATION = {
+  street1: "",
+  district: "",
+  city: "",
+  country: "",
+  postalcode: "",
+  state: "",
+  displayTitle: "حرّك الخريطة لتحديد موقعك",
+  displaySubtitle: "",
+};
 
 export default function AddressScreen() {
   const router = useRouter();
@@ -74,8 +69,7 @@ export default function AddressScreen() {
 
   const addresses = data?.addresses || [];
 
-  // Screen State
-  const [searchQuery, setSearchQuery] = useState("");
+  // Modals State
   const [isMapModalVisible, setIsMapModalVisible] = useState(false);
   const [isDetailsModalVisible, setIsDetailsModalVisible] = useState(false);
   const [isActionModalVisible, setIsActionModalVisible] = useState(false);
@@ -84,54 +78,45 @@ export default function AddressScreen() {
 
   // Map & Location State
   const [centerCoords, setCenterCoords] = useState(DEFAULT_COORDS);
+  const [cameraTarget, setCameraTarget] = useState({ coordinates: DEFAULT_COORDS, zoom: 16 });
+  const latestCameraRef = useRef({ coordinates: DEFAULT_COORDS, zoom: 16 });
+  const committedCoordsRef = useRef(DEFAULT_COORDS);
   const [isLocating, setIsLocating] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const [mapSearchText, setMapSearchText] = useState("");
-  const [locationInfo, setLocationInfo] = useState({
-    street1: "شارع ابي بكر الرازي",
-    district: "السليمانية",
-    city: "الرياض",
-    country: "السعودية",
-    postalcode: "12231",
-    state: "منطقة الرياض",
-    displayTitle: "شارع ابي بكر الرازي",
-    displaySubtitle: "السليمانية - الرياض - السعودية",
-  });
+  const [locationInfo, setLocationInfo] = useState(EMPTY_LOCATION);
 
   // Form State
-  const [formTitle, setFormTitle] = useState("المنزل");
-  const [formRecipient, setFormRecipient] = useState("");
-  const [formPhone, setFormPhone] = useState("");
-  const [formStreet, setFormStreet] = useState("");
-  const [formDistrict, setFormDistrict] = useState("");
-  const [formCity, setFormCity] = useState("الرياض");
-  const [formPostalCode, setFormPostalCode] = useState("");
-  const [formIsDefault, setFormIsDefault] = useState(false);
+  const [form, setForm] = useState({
+    title: "المنزل",
+    recipient: "",
+    phone: "",
+    street: "",
+    district: "",
+    city: "",
+    postalCode: "",
+    country: "",
+    isDefault: false,
+  });
 
   const geocodeTimeoutRef = useRef(null);
 
   // Populate recipient info from user profile
   useEffect(() => {
     if (user) {
-      if (!formRecipient) {
-        setFormRecipient(user.fullName || user.firstName || "");
-      }
-      if (!formPhone) {
-        setFormPhone(user.primaryPhoneNumber?.phoneNumber || "");
-      }
+      setForm((prev) => ({
+        ...prev,
+        recipient: prev.recipient || user.fullName || user.firstName || "",
+        phone: prev.phone || user.primaryPhoneNumber?.phoneNumber || "",
+      }));
     }
   }, [user]);
 
-  // Filtered addresses
-  const filteredAddresses = useMemo(() => {
-    if (!searchQuery.trim()) return addresses;
-    const q = searchQuery.toLowerCase().trim();
-    return addresses.filter((addr) => {
-      const dest = addr.destination || {};
-      const fullText = `${addr.title || ""} ${addr.recipientName || ""} ${dest.street1 || ""} ${dest.district || ""} ${dest.city || ""} ${addr.phonenumber || ""}`.toLowerCase();
-      return fullText.includes(q);
-    });
-  }, [addresses, searchQuery]);
+  const handleFormChange = (key, value) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    if (key === "country") {
+      setLocationInfo((prev) => ({ ...prev, country: value }));
+    }
+  };
 
   // Reverse Geocoding via expo-location
   const reverseGeocode = async (latitude, longitude) => {
@@ -140,10 +125,10 @@ export default function AddressScreen() {
       const results = await Location.reverseGeocodeAsync({ latitude, longitude });
       if (results && results.length > 0) {
         const place = results[0];
-        const street = place.street || place.name || "شارع غير محدد";
+        const street = place.street || place.name || "";
         const district = place.district || place.subregion || "";
-        const city = place.city || place.region || "الرياض";
-        const country = place.country || "السعودية";
+        const city = place.city || place.region || "";
+        const country = place.country || "";
         const postalcode = place.postalCode || "";
         const state = place.region || "";
 
@@ -154,15 +139,19 @@ export default function AddressScreen() {
           country: country,
           postalcode: postalcode,
           state: state,
-          displayTitle: street,
+          displayTitle: street || city || "موقع غير معروف",
           displaySubtitle: [district, city, country].filter(Boolean).join(" - "),
         });
 
-        // Prefill form
-        setFormStreet(street);
-        setFormDistrict(district);
-        setFormCity(city);
-        setFormPostalCode(postalcode);
+        // Prefill form with geocoded info
+        setForm((prev) => ({
+          ...prev,
+          street: street || prev.street,
+          district: district || prev.district,
+          city: city || prev.city,
+          postalCode: postalcode || prev.postalCode,
+          country: country || prev.country,
+        }));
       }
     } catch (err) {
       console.warn("Reverse geocoding error:", err);
@@ -171,17 +160,44 @@ export default function AddressScreen() {
     }
   };
 
-  // Debounced Camera Move
+  // Programmatically move the map camera
+  const moveCameraTo = (coords) => {
+    const zoom = latestCameraRef.current.zoom || 16;
+    latestCameraRef.current = { coordinates: coords, zoom };
+    committedCoordsRef.current = coords;
+    setCenterCoords(coords);
+    setCameraTarget({ coordinates: { ...coords }, zoom });
+  };
+
+  // Debounced Camera Move — no per-frame re-renders to prevent map shaking
   const handleCameraMove = (event) => {
     const coords = event?.coordinates;
-    if (coords?.latitude && coords?.longitude) {
-      setCenterCoords(coords);
-      if (geocodeTimeoutRef.current) clearTimeout(geocodeTimeoutRef.current);
-      geocodeTimeoutRef.current = setTimeout(() => {
-        reverseGeocode(coords.latitude, coords.longitude);
-      }, 600);
-    }
+    if (typeof coords?.latitude !== "number" || typeof coords?.longitude !== "number") return;
+
+    latestCameraRef.current = {
+      coordinates: { latitude: coords.latitude, longitude: coords.longitude },
+      zoom: typeof event?.zoom === "number" ? event.zoom : latestCameraRef.current.zoom,
+    };
+
+    if (geocodeTimeoutRef.current) clearTimeout(geocodeTimeoutRef.current);
+    geocodeTimeoutRef.current = setTimeout(() => {
+      const { latitude, longitude } = latestCameraRef.current.coordinates;
+      const prev = committedCoordsRef.current;
+      const moved =
+        Math.abs(prev.latitude - latitude) > 0.00001 ||
+        Math.abs(prev.longitude - longitude) > 0.00001;
+      if (!moved) return;
+      committedCoordsRef.current = { latitude, longitude };
+      setCenterCoords({ latitude, longitude });
+      reverseGeocode(latitude, longitude);
+    }, 600);
   };
+
+  useEffect(() => {
+    return () => {
+      if (geocodeTimeoutRef.current) clearTimeout(geocodeTimeoutRef.current);
+    };
+  }, []);
 
   // Current Location Button Press
   const handleGetCurrentLocation = async () => {
@@ -207,7 +223,7 @@ export default function AddressScreen() {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         };
-        setCenterCoords(newCoords);
+        moveCameraTo(newCoords);
         await reverseGeocode(newCoords.latitude, newCoords.longitude);
       }
     } catch (error) {
@@ -221,13 +237,22 @@ export default function AddressScreen() {
     }
   };
 
-  // Open Map Modal
+  // Open Map Modal for New Address
   const handleOpenMapModal = () => {
     setEditingAddressId(null);
-    setFormTitle("المنزل");
-    setFormIsDefault(addresses.length === 0);
+    setForm({
+      title: "المنزل",
+      recipient: user?.fullName || user?.firstName || "",
+      phone: user?.primaryPhoneNumber?.phoneNumber || "",
+      street: "",
+      district: "",
+      city: "",
+      postalCode: "",
+      country: "",
+      isDefault: addresses.length === 0,
+    });
+    setLocationInfo(EMPTY_LOCATION);
     setIsMapModalVisible(true);
-    // Request initial location if not already Riyadh
     handleGetCurrentLocation();
   };
 
@@ -238,29 +263,42 @@ export default function AddressScreen() {
 
   // Save Address Submission
   const handleSaveAddress = async () => {
-    if (!formStreet.trim()) {
+    if (!form.street.trim()) {
       Toast.show({ type: "error", text1: "يرجى كتابة اسم الشارع أو تفاصيل العنوان" });
       return;
     }
-    if (!formPhone.trim()) {
+    if (!form.phone.trim()) {
       Toast.show({ type: "error", text1: "يرجى كتابة رقم الجوال" });
+      return;
+    }
+    if (!form.city.trim()) {
+      Toast.show({ type: "error", text1: "يرجى كتابة اسم المدينة" });
+      return;
+    }
+    if (!form.postalCode.trim()) {
+      Toast.show({ type: "error", text1: "يرجى كتابة الرمز البريدي" });
+      return;
+    }
+    const country = (form.country || locationInfo.country || "").trim();
+    if (!country) {
+      Toast.show({ type: "error", text1: "يرجى كتابة اسم الدولة" });
       return;
     }
 
     const payload = {
-      title: formTitle,
-      recipientName: formRecipient.trim(),
-      phonenumber: formPhone.trim(),
+      title: form.title,
+      recipientName: form.recipient.trim(),
+      phonenumber: form.phone.trim(),
       destination: {
-        country: locationInfo.country || "السعودية",
-        city: formCity.trim() || locationInfo.city || "الرياض",
-        district: formDistrict.trim() || locationInfo.district || "",
-        postalcode: formPostalCode.trim() || locationInfo.postalcode || "",
-        street1: formStreet.trim(),
-        state: locationInfo.state || "منطقة الرياض",
+        country,
+        city: form.city.trim(),
+        district: form.district.trim(),
+        postalcode: form.postalCode.trim(),
+        street1: form.street.trim(),
+        state: locationInfo.state || "",
       },
       coordinates: centerCoords,
-      isDefault: formIsDefault,
+      isDefault: form.isDefault,
     };
 
     try {
@@ -274,7 +312,6 @@ export default function AddressScreen() {
         const res = await createAddressMutation.mutateAsync(payload);
         Toast.show({ type: "success", text1: "تمت إضافة العنوان بنجاح" });
 
-        // If cart is present, link newly created address
         if (res?.address?._id) {
           try {
             await updateCartAddressMutation.mutateAsync(res.address._id);
@@ -334,17 +371,35 @@ export default function AddressScreen() {
   const handleEditAddress = (address) => {
     setIsActionModalVisible(false);
     setEditingAddressId(address._id);
-    setFormTitle(address.title || "المنزل");
-    setFormRecipient(address.recipientName || "");
-    setFormPhone(address.phonenumber || "");
-    setFormStreet(address.destination?.street1 || "");
-    setFormDistrict(address.destination?.district || "");
-    setFormCity(address.destination?.city || "الرياض");
-    setFormPostalCode(address.destination?.postalcode || "");
-    setFormIsDefault(address.isDefault || false);
+    const d = address.destination || {};
+    setForm({
+      title: address.title || "المنزل",
+      recipient: address.recipientName || "",
+      phone: address.phonenumber || "",
+      street: d.street1 || "",
+      district: d.district || "",
+      city: d.city || "",
+      postalCode: d.postalcode || "",
+      country: d.country || "",
+      isDefault: address.isDefault || false,
+    });
+
+    setLocationInfo({
+      street1: d.street1 || "",
+      district: d.district || "",
+      city: d.city || "",
+      country: d.country || "",
+      postalcode: d.postalcode || "",
+      state: d.state || "",
+      displayTitle: d.street1 || d.city || "",
+      displaySubtitle: [d.district, d.city, d.country].filter(Boolean).join(" - "),
+    });
 
     if (address.coordinates?.latitude && address.coordinates?.longitude) {
-      setCenterCoords(address.coordinates);
+      moveCameraTo({
+        latitude: address.coordinates.latitude,
+        longitude: address.coordinates.longitude,
+      });
     }
 
     setIsDetailsModalVisible(true);
@@ -359,7 +414,6 @@ export default function AddressScreen() {
         text1: "تم اختيار موقع التوصيل بنجاح",
         text2: address.title,
       });
-      // Optionally navigate back if came from cart
       router.back();
     } catch (_) {
       handleSetDefault(address);
@@ -416,7 +470,7 @@ export default function AddressScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 40 }}
       >
-        {/* ─── Subtitle & Warning Notice (Screenshot 2) ─── */}
+        {/* ─── Subtitle & Warning Notice ─── */}
         <View className="mb-4">
           <Text
             style={{
@@ -441,44 +495,7 @@ export default function AddressScreen() {
           </Text>
         </View>
 
-        {/* ─── Search Input Bar (Screenshot 2) ─── */}
-        <View
-          style={{
-            flexDirection: "row-reverse",
-            alignItems: "center",
-            backgroundColor: "#FFFFFF",
-            borderRadius: 16,
-            borderWidth: 1,
-            borderColor: "#E5E7EB",
-            paddingHorizontal: 14,
-            paddingVertical: 10,
-            marginBottom: 16,
-          }}
-        >
-          <Search size={18} color="#9CA3AF" />
-          <TextInput
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="دور على المبنى، المنطقة..."
-            placeholderTextColor="#9CA3AF"
-            style={{
-              flex: 1,
-              fontFamily: Fonts.Cairo_Regular,
-              fontSize: 13,
-              color: Colors.text,
-              textAlign: "right",
-              marginRight: 10,
-              padding: 0,
-            }}
-          />
-          {searchQuery ? (
-            <TouchableOpacity onPress={() => setSearchQuery("")}>
-              <X size={16} color="#9CA3AF" />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        {/* ─── "+ أضف عنوان جديد" Action Button (Screenshot 2) ─── */}
+        {/* ─── "+ أضف عنوان جديد" Action Button ─── */}
         <TouchableOpacity
           activeOpacity={0.75}
           onPress={handleOpenMapModal}
@@ -515,7 +532,7 @@ export default function AddressScreen() {
           <ChevronLeft size={18} color="#9CA3AF" />
         </TouchableOpacity>
 
-        {/* ─── Saved Addresses List (Screenshot 2) ─── */}
+        {/* ─── Saved Addresses List ─── */}
         {isLoading ? (
           <View className="py-16 items-center justify-center">
             <ActivityIndicator size="large" color={Colors.primary} />
@@ -530,7 +547,7 @@ export default function AddressScreen() {
               جارٍ تحميل العناوين...
             </Text>
           </View>
-        ) : filteredAddresses.length === 0 ? (
+        ) : addresses.length === 0 ? (
           <View className="py-14 items-center justify-center">
             <View className="h-16 w-16 rounded-full bg-surface items-center justify-center mb-3">
               <MapPin size={28} color={Colors.primary} />
@@ -543,7 +560,7 @@ export default function AddressScreen() {
                 textAlign: "center",
               }}
             >
-              {searchQuery ? "لا توجد نتائج مطابقة" : "لا توجد عناوين توصيل بعد"}
+              لا توجد عناوين توصيل بعد
             </Text>
             <Text
               style={{
@@ -558,7 +575,7 @@ export default function AddressScreen() {
             </Text>
           </View>
         ) : (
-          filteredAddresses.map((address) => {
+          addresses.map((address) => {
             const isHome = address.title === "المنزل";
             const isWork = address.title === "العمل";
 
@@ -709,752 +726,37 @@ export default function AddressScreen() {
         )}
       </ScrollView>
 
-      {/* ─────────────────────────────────────────────────────────────
-          1. FULL-SCREEN MAP MODAL WITH SMOOTH TRANSITION (Screenshot 1)
-         ───────────────────────────────────────────────────────────── */}
-      <Modal
+      {/* ─── Modals (Modular Components) ─── */}
+      <AddressMapModal
         visible={isMapModalVisible}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        onRequestClose={() => setIsMapModalVisible(false)}
-      >
-        <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
-          {/* Map View */}
-          <View style={{ flex: 1, position: "relative" }}>
-            {MapComponent ? (
-              <MapComponent
-                style={{ width: "100%", height: "100%" }}
-                cameraPosition={{
-                  coordinates: centerCoords,
-                  zoom: 16,
-                }}
-                onCameraMove={handleCameraMove}
-                properties={{
-                  isMyLocationEnabled: true,
-                }}
-                uiSettings={{
-                  myLocationButtonEnabled: false,
-                  compassEnabled: false,
-                }}
-              />
-            ) : (
-              <View className="flex-1 bg-slate-100 items-center justify-center p-6">
-                <MapPin size={40} color={Colors.primary} />
-                <Text
-                  style={{
-                    fontFamily: Fonts.Cairo_Bold,
-                    fontSize: 14,
-                    color: Colors.text,
-                    marginTop: 12,
-                  }}
-                >
-                  {locationInfo.displayTitle}
-                </Text>
-              </View>
-            )}
+        onClose={() => setIsMapModalVisible(false)}
+        cameraTarget={cameraTarget}
+        onCameraMove={handleCameraMove}
+        locationInfo={locationInfo}
+        isGeocoding={isGeocoding}
+        isLocating={isLocating}
+        onGetCurrentLocation={handleGetCurrentLocation}
+        onProceed={handleProceedToDetails}
+      />
 
-            {/* ── Top Floating Search Bar (Screenshot 1) ── */}
-            <View
-              style={{
-                position: "absolute",
-                top: 14,
-                left: 16,
-                right: 16,
-                backgroundColor: "#FFFFFF",
-                borderRadius: 16,
-                flexDirection: "row-reverse",
-                alignItems: "center",
-                paddingHorizontal: 14,
-                paddingVertical: 10,
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 3 },
-                shadowOpacity: 0.12,
-                shadowRadius: 6,
-                elevation: 4,
-              }}
-            >
-              <TouchableOpacity
-                onPress={() => setIsMapModalVisible(false)}
-                className="p-1 -mr-1"
-              >
-                <ArrowRight size={20} color="#374151" />
-              </TouchableOpacity>
-              <TextInput
-                value={mapSearchText}
-                onChangeText={setMapSearchText}
-                placeholder="دور على المبنى، المنطقة..."
-                placeholderTextColor="#9CA3AF"
-                style={{
-                  flex: 1,
-                  fontFamily: Fonts.Cairo_Regular,
-                  fontSize: 13,
-                  color: "#1F2937",
-                  textAlign: "right",
-                  marginRight: 10,
-                  padding: 0,
-                }}
-              />
-              <Search size={18} color="#9CA3AF" />
-            </View>
-
-            {/* ── Fixed Center Pin & Tooltip Bubble (Screenshot 1) ── */}
-            <View
-              pointerEvents="none"
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 140,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {/* Tooltip bubble */}
-              <View
-                style={{
-                  backgroundColor: "#FFFFFF",
-                  paddingHorizontal: 16,
-                  paddingVertical: 10,
-                  borderRadius: 16,
-                  shadowColor: "#000",
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.15,
-                  shadowRadius: 8,
-                  elevation: 6,
-                  marginBottom: 8,
-                  borderWidth: 1,
-                  borderColor: "#F3F4F6",
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: Fonts.Cairo_Bold,
-                    fontSize: 13,
-                    color: "#1F2937",
-                    textAlign: "center",
-                  }}
-                >
-                  سيتم توصيل طلبك إلى هذا الموقع
-                </Text>
-                {/* Pointer triangle */}
-                <View
-                  style={{
-                    position: "absolute",
-                    bottom: -6,
-                    alignSelf: "center",
-                    width: 0,
-                    height: 0,
-                    borderLeftWidth: 6,
-                    borderRightWidth: 6,
-                    borderTopWidth: 6,
-                    borderLeftColor: "transparent",
-                    borderRightColor: "transparent",
-                    borderTopColor: "#FFFFFF",
-                  }}
-                />
-              </View>
-
-              {/* Black Pin icon */}
-              <View
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 22,
-                  backgroundColor: "#111827",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  shadowColor: "#000",
-                  shadowOffset: { width: 0, height: 3 },
-                  shadowOpacity: 0.25,
-                  shadowRadius: 5,
-                  elevation: 5,
-                }}
-              >
-                <MapPin size={22} color="#FFFFFF" />
-              </View>
-
-              {/* Blue pulse dot underneath */}
-              <View
-                style={{
-                  width: 16,
-                  height: 6,
-                  borderRadius: 8,
-                  backgroundColor: "rgba(37, 99, 235, 0.45)",
-                  marginTop: 2,
-                }}
-              />
-            </View>
-
-            {/* ── Floating "الموقع الحالي" Button (Screenshot 1) ── */}
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={handleGetCurrentLocation}
-              disabled={isLocating}
-              style={{
-                position: "absolute",
-                bottom: 175,
-                alignSelf: "center",
-                flexDirection: "row-reverse",
-                alignItems: "center",
-                gap: 8,
-                backgroundColor: "#FFFFFF",
-                paddingHorizontal: 20,
-                paddingVertical: 10,
-                borderRadius: 24,
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 3 },
-                shadowOpacity: 0.15,
-                shadowRadius: 6,
-                elevation: 4,
-                borderWidth: 1,
-                borderColor: "#F3F4F6",
-              }}
-            >
-              {isLocating ? (
-                <ActivityIndicator size="small" color="#111827" />
-              ) : (
-                <Navigation size={16} color="#111827" />
-              )}
-              <Text
-                style={{
-                  fontFamily: Fonts.Cairo_Bold,
-                  fontSize: 13,
-                  color: "#111827",
-                }}
-              >
-                الموقع الحالي
-              </Text>
-            </TouchableOpacity>
-
-            {/* ── Bottom Sheet Card (Screenshot 1) ── */}
-            <View
-              style={{
-                position: "absolute",
-                bottom: 20,
-                left: 16,
-                right: 16,
-                backgroundColor: "#FFFFFF",
-                borderRadius: 24,
-                padding: 18,
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 6 },
-                shadowOpacity: 0.15,
-                shadowRadius: 12,
-                elevation: 8,
-              }}
-            >
-              <View
-                style={{
-                  flexDirection: "row-reverse",
-                  alignItems: "center",
-                  gap: 14,
-                }}
-              >
-                <View
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 22,
-                    backgroundColor: "#111827",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    shrink: 0,
-                  }}
-                >
-                  <MapPin size={22} color="#FFFFFF" />
-                </View>
-                <View style={{ flex: 1, alignItems: "flex-end" }}>
-                  <Text
-                    style={{
-                      fontFamily: Fonts.Cairo_Bold,
-                      fontSize: 16,
-                      color: "#111827",
-                      textAlign: "right",
-                    }}
-                    numberOfLines={1}
-                  >
-                    {isGeocoding ? "جارٍ تحديد العنوان..." : locationInfo.displayTitle}
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily: Fonts.Cairo_Regular,
-                      fontSize: 12,
-                      color: "#6B7280",
-                      textAlign: "right",
-                      marginTop: 2,
-                    }}
-                    numberOfLines={1}
-                  >
-                    {locationInfo.displaySubtitle}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Add Address Details Button */}
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={handleProceedToDetails}
-                style={{
-                  marginTop: 16,
-                  backgroundColor: "#1F242F",
-                  borderRadius: 16,
-                  paddingVertical: 14,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: Fonts.Cairo_Bold,
-                    fontSize: 15,
-                    color: "#FFFFFF",
-                  }}
-                >
-                  أضف تفاصيل العنوان
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </SafeAreaView>
-      </Modal>
-
-      {/* ─────────────────────────────────────────────────────────────
-          2. ADDRESS DETAILS MODAL (FORM)
-         ───────────────────────────────────────────────────────────── */}
-      <Modal
+      <AddressDetailsModal
         visible={isDetailsModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setIsDetailsModalVisible(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}
-        >
-          <View
-            style={{
-              backgroundColor: "#FFFFFF",
-              borderTopLeftRadius: 28,
-              borderTopRightRadius: 28,
-              padding: 22,
-              maxHeight: SCREEN_HEIGHT * 0.88,
-            }}
-          >
-            {/* Header */}
-            <View className="flex-row-reverse items-center justify-between pb-3 border-b border-gray-100">
-              <Text
-                style={{
-                  fontFamily: Fonts.Cairo_Bold,
-                  fontSize: 17,
-                  color: Colors.text,
-                }}
-              >
-                {editingAddressId ? "تعديل تفاصيل العنوان" : "تفاصيل عنوان التوصيل"}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setIsDetailsModalVisible(false)}
-                className="p-1 rounded-full bg-gray-100"
-              >
-                <X size={18} color="#4B5563" />
-              </TouchableOpacity>
-            </View>
+        onClose={() => setIsDetailsModalVisible(false)}
+        isEditing={Boolean(editingAddressId)}
+        form={form}
+        onChange={handleFormChange}
+        onSubmit={handleSaveAddress}
+        isSaving={createAddressMutation.isPending || updateAddressMutation.isPending}
+      />
 
-            <ScrollView showsVerticalScrollIndicator={false} className="pt-4 space-y-4">
-              {/* Title Chips (المنزل / العمل / أخرى) */}
-              <View>
-                <Text
-                  style={{
-                    fontFamily: Fonts.Cairo_Bold,
-                    fontSize: 13,
-                    color: Colors.text,
-                    textAlign: "right",
-                    marginBottom: 8,
-                  }}
-                >
-                  نوع العنوان
-                </Text>
-                <View className="flex-row-reverse gap-2.5">
-                  {[
-                    { label: "المنزل", icon: Home },
-                    { label: "العمل", icon: Briefcase },
-                    { label: "استراحة", icon: MapPin },
-                  ].map((chip) => {
-                    const isSelected = formTitle === chip.label;
-                    const IconComp = chip.icon;
-                    return (
-                      <TouchableOpacity
-                        key={chip.label}
-                        activeOpacity={0.7}
-                        onPress={() => setFormTitle(chip.label)}
-                        style={{
-                          flexDirection: "row-reverse",
-                          alignItems: "center",
-                          gap: 6,
-                          paddingHorizontal: 14,
-                          paddingVertical: 8,
-                          borderRadius: 12,
-                          backgroundColor: isSelected ? Colors.primary : "#F3F4F6",
-                        }}
-                      >
-                        <IconComp size={15} color={isSelected ? "#FFFFFF" : "#4B5563"} />
-                        <Text
-                          style={{
-                            fontFamily: Fonts.Cairo_Bold,
-                            fontSize: 12,
-                            color: isSelected ? "#FFFFFF" : "#4B5563",
-                          }}
-                        >
-                          {chip.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-
-              {/* Recipient Name */}
-              <View>
-                <Text
-                  style={{
-                    fontFamily: Fonts.Cairo_Bold,
-                    fontSize: 12,
-                    color: Colors.text,
-                    textAlign: "right",
-                    marginBottom: 6,
-                  }}
-                >
-                  اسم المستلم
-                </Text>
-                <View className="flex-row-reverse items-center bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
-                  <User size={16} color="#9CA3AF" />
-                  <TextInput
-                    value={formRecipient}
-                    onChangeText={setFormRecipient}
-                    placeholder="مثال: علي إدريس"
-                    placeholderTextColor="#9CA3AF"
-                    style={{
-                      flex: 1,
-                      fontFamily: Fonts.Cairo_Regular,
-                      fontSize: 13,
-                      color: Colors.text,
-                      textAlign: "right",
-                      marginRight: 8,
-                      padding: 0,
-                    }}
-                  />
-                </View>
-              </View>
-
-              {/* Phone Number */}
-              <View>
-                <Text
-                  style={{
-                    fontFamily: Fonts.Cairo_Bold,
-                    fontSize: 12,
-                    color: Colors.text,
-                    textAlign: "right",
-                    marginBottom: 6,
-                  }}
-                >
-                  رقم الجوال للتوصيل
-                </Text>
-                <View className="flex-row-reverse items-center bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
-                  <Phone size={16} color="#9CA3AF" />
-                  <TextInput
-                    value={formPhone}
-                    onChangeText={setFormPhone}
-                    placeholder="05XXXXXXXX أو +966..."
-                    keyboardType="phone-pad"
-                    placeholderTextColor="#9CA3AF"
-                    style={{
-                      flex: 1,
-                      fontFamily: Fonts.Cairo_Regular,
-                      fontSize: 13,
-                      color: Colors.text,
-                      textAlign: "right",
-                      marginRight: 8,
-                      padding: 0,
-                    }}
-                  />
-                </View>
-              </View>
-
-              {/* Street & Building Name */}
-              <View>
-                <Text
-                  style={{
-                    fontFamily: Fonts.Cairo_Bold,
-                    fontSize: 12,
-                    color: Colors.text,
-                    textAlign: "right",
-                    marginBottom: 6,
-                  }}
-                >
-                  اسم الشارع ورقم المبنى
-                </Text>
-                <TextInput
-                  value={formStreet}
-                  onChangeText={setFormStreet}
-                  placeholder="مثال: شارع ابي بكر الرازي - مبنى 24"
-                  placeholderTextColor="#9CA3AF"
-                  style={{
-                    fontFamily: Fonts.Cairo_Regular,
-                    fontSize: 13,
-                    color: Colors.text,
-                    backgroundColor: "#F9FAFB",
-                    borderWidth: 1,
-                    borderColor: "#E5E7EB",
-                    borderRadius: 12,
-                    paddingHorizontal: 12,
-                    paddingVertical: 10,
-                    textAlign: "right",
-                  }}
-                />
-              </View>
-
-              {/* District & City */}
-              <View className="flex-row-reverse gap-3">
-                <View className="flex-1">
-                  <Text
-                    style={{
-                      fontFamily: Fonts.Cairo_Bold,
-                      fontSize: 12,
-                      color: Colors.text,
-                      textAlign: "right",
-                      marginBottom: 6,
-                    }}
-                  >
-                    الحي
-                  </Text>
-                  <TextInput
-                    value={formDistrict}
-                    onChangeText={setFormDistrict}
-                    placeholder="مثال: السليمانية"
-                    placeholderTextColor="#9CA3AF"
-                    style={{
-                      fontFamily: Fonts.Cairo_Regular,
-                      fontSize: 13,
-                      color: Colors.text,
-                      backgroundColor: "#F9FAFB",
-                      borderWidth: 1,
-                      borderColor: "#E5E7EB",
-                      borderRadius: 12,
-                      paddingHorizontal: 12,
-                      paddingVertical: 10,
-                      textAlign: "right",
-                    }}
-                  />
-                </View>
-
-                <View className="flex-1">
-                  <Text
-                    style={{
-                      fontFamily: Fonts.Cairo_Bold,
-                      fontSize: 12,
-                      color: Colors.text,
-                      textAlign: "right",
-                      marginBottom: 6,
-                    }}
-                  >
-                    المدينة
-                  </Text>
-                  <TextInput
-                    value={formCity}
-                    onChangeText={setFormCity}
-                    placeholder="الرياض"
-                    placeholderTextColor="#9CA3AF"
-                    style={{
-                      fontFamily: Fonts.Cairo_Regular,
-                      fontSize: 13,
-                      color: Colors.text,
-                      backgroundColor: "#F9FAFB",
-                      borderWidth: 1,
-                      borderColor: "#E5E7EB",
-                      borderRadius: 12,
-                      paddingHorizontal: 12,
-                      paddingVertical: 10,
-                      textAlign: "right",
-                    }}
-                  />
-                </View>
-              </View>
-
-              {/* Default Address Checkbox */}
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => setFormIsDefault(!formIsDefault)}
-                className="flex-row-reverse items-center justify-between p-3.5 bg-gray-50 rounded-xl border border-gray-200"
-              >
-                <View className="items-end">
-                  <Text
-                    style={{
-                      fontFamily: Fonts.Cairo_Bold,
-                      fontSize: 13,
-                      color: Colors.text,
-                    }}
-                  >
-                    تعيين كعنوان افتراضي
-                  </Text>
-                  <Text
-                    style={{
-                      fontFamily: Fonts.Cairo_Regular,
-                      fontSize: 11,
-                      color: Colors.textSecondary,
-                    }}
-                  >
-                    سيتم اعتماد هذا العنوان تلقائياً لطلباتك القادمة
-                  </Text>
-                </View>
-                <View
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 6,
-                    borderWidth: 1.5,
-                    borderColor: formIsDefault ? Colors.primary : "#D1D5DB",
-                    backgroundColor: formIsDefault ? Colors.primary : "#FFFFFF",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  {formIsDefault && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
-                </View>
-              </TouchableOpacity>
-
-              {/* Submit Button */}
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={handleSaveAddress}
-                disabled={createAddressMutation.isPending || updateAddressMutation.isPending}
-                style={{
-                  backgroundColor: Colors.primary,
-                  borderRadius: 16,
-                  paddingVertical: 14,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginTop: 8,
-                  marginBottom: 16,
-                }}
-              >
-                {createAddressMutation.isPending || updateAddressMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text
-                    style={{
-                      fontFamily: Fonts.Cairo_Bold,
-                      fontSize: 15,
-                      color: "#FFFFFF",
-                    }}
-                  >
-                    {editingAddressId ? "حفظ التعديلات" : "تأكيد وحفظ العنوان"}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* ─────────────────────────────────────────────────────────────
-          3. ADDRESS OPTIONS BOTTOM SHEET (ACTIONS)
-         ───────────────────────────────────────────────────────────── */}
-      <Modal
+      <AddressActionsModal
         visible={isActionModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setIsActionModalVisible(false)}
-      >
-        <TouchableOpacity
-          activeOpacity={1}
-          onPress={() => setIsActionModalVisible(false)}
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.45)",
-            justifyContent: "flex-end",
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: "#FFFFFF",
-              borderTopLeftRadius: 24,
-              borderTopRightRadius: 24,
-              padding: 20,
-            }}
-          >
-            <View className="items-center pb-2">
-              <View className="w-12 h-1.5 bg-gray-200 rounded-full mb-3" />
-              <Text
-                style={{
-                  fontFamily: Fonts.Cairo_Bold,
-                  fontSize: 15,
-                  color: Colors.text,
-                }}
-              >
-                خيارات العنوان: {selectedAddressForAction?.title}
-              </Text>
-            </View>
-
-            <View className="space-y-2 pt-2">
-              {/* Set as Default */}
-              {!selectedAddressForAction?.isDefault && (
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={() => handleSetDefault(selectedAddressForAction)}
-                  className="flex-row-reverse items-center gap-3 p-3.5 rounded-xl bg-gray-50"
-                >
-                  <Star size={18} color="#D97706" />
-                  <Text
-                    style={{
-                      fontFamily: Fonts.Cairo_Bold,
-                      fontSize: 13,
-                      color: Colors.text,
-                    }}
-                  >
-                    تعيين كعنوان افتراضي
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Edit */}
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => handleEditAddress(selectedAddressForAction)}
-                className="flex-row-reverse items-center gap-3 p-3.5 rounded-xl bg-gray-50"
-              >
-                <Edit3 size={18} color="#3B82F6" />
-                <Text
-                  style={{
-                    fontFamily: Fonts.Cairo_Bold,
-                    fontSize: 13,
-                    color: Colors.text,
-                  }}
-                >
-                  تعديل تفاصيل العنوان
-                </Text>
-              </TouchableOpacity>
-
-              {/* Delete */}
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => handleDeleteAddress(selectedAddressForAction)}
-                className="flex-row-reverse items-center gap-3 p-3.5 rounded-xl bg-red-50"
-              >
-                <Trash2 size={18} color="#EF4444" />
-                <Text
-                  style={{
-                    fontFamily: Fonts.Cairo_Bold,
-                    fontSize: 13,
-                    color: "#EF4444",
-                  }}
-                >
-                  حذف العنوان
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+        onClose={() => setIsActionModalVisible(false)}
+        address={selectedAddressForAction}
+        onSetDefault={handleSetDefault}
+        onEdit={handleEditAddress}
+        onDelete={handleDeleteAddress}
+      />
     </SafeAreaView>
   );
 }

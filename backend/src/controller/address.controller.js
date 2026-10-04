@@ -43,22 +43,35 @@ export const createAddress = async (req, res) => {
       );
     }
 
+    // Address values come only from the customer (no hardcoded fallbacks)
+    const pick = (a, b) => (typeof (a ?? b) === "string" ? (a ?? b).trim() : undefined);
     const dest = {
-      country: destination?.country || country || "السعودية",
-      city: destination?.city || city || "",
-      district: destination?.district || district || "",
-      postalcode: destination?.postalcode || postalcode || "",
-      street1: destination?.street1 || street1 || "",
-      state: destination?.state || state || "",
+      country: pick(destination?.country, country),
+      city: pick(destination?.city, city),
+      district: pick(destination?.district, district),
+      postalcode: pick(destination?.postalcode, postalcode),
+      street1: pick(destination?.street1, street1),
+      state: pick(destination?.state, state),
     };
+    const phone = (phonenumber || checkuser.phonenumber || "").trim();
+
+    const missing = [];
+    if (!dest.country) missing.push("الدولة");
+    if (!dest.city) missing.push("المدينة");
+    if (!dest.street1) missing.push("اسم الشارع");
+    if (!dest.postalcode) missing.push("الرمز البريدي");
+    if (!phone) missing.push("رقم الجوال");
+    if (missing.length) {
+      return res.status(400).json({ error: `الحقول التالية مطلوبة: ${missing.join("، ")}` });
+    }
 
     const address = new Address({
       userId: checkuser._id,
       title: title || "المنزل",
       recipientName: recipientName || checkuser.name || "",
       destination: dest,
-      coordinates: coordinates || null,
-      phonenumber: phonenumber || checkuser.phonenumber || "",
+      coordinates: coordinates || undefined,
+      phonenumber: phone,
       isDefault: makeDefault,
     });
 
@@ -71,6 +84,10 @@ export const createAddress = async (req, res) => {
     });
   } catch (error) {
     console.error("createAddress error:", error);
+    if (error?.name === "ValidationError") {
+      const msg = Object.values(error.errors).map((e) => e.message).join("، ");
+      return res.status(400).json({ error: msg });
+    }
     res.status(500).json({ message: "Internal Server Error", error });
   }
 };
@@ -239,13 +256,19 @@ export const updateUserAddress = async (req, res) => {
         userId: checkuser._id,
       });
       if (existing) {
+        // Keep existing values for fields the customer didn't send — never invent values
+        const val = (a, b, old) => {
+          const v = a ?? b;
+          return typeof v === "string" ? v.trim() : old;
+        };
+        const prev = existing.destination || {};
         updates.destination = {
-          country: destination?.country || country || existing.destination?.country || "السعودية",
-          city: destination?.city || city || existing.destination?.city || "",
-          district: destination?.district || district || existing.destination?.district || "",
-          postalcode: destination?.postalcode || postalcode || existing.destination?.postalcode || "",
-          street1: destination?.street1 || street1 || existing.destination?.street1 || "",
-          state: destination?.state || state || existing.destination?.state || "",
+          country: val(destination?.country, country, prev.country),
+          city: val(destination?.city, city, prev.city),
+          district: val(destination?.district, district, prev.district),
+          postalcode: val(destination?.postalcode, postalcode, prev.postalcode),
+          street1: val(destination?.street1, street1, prev.street1),
+          state: val(destination?.state, state, prev.state),
         };
       }
     }
@@ -253,7 +276,7 @@ export const updateUserAddress = async (req, res) => {
     const address = await Address.findOneAndUpdate(
       { _id: addressId, userId: checkuser._id },
       updates,
-      { new: true }
+      { new: true, runValidators: true }
     );
 
     if (!address) {
@@ -267,6 +290,10 @@ export const updateUserAddress = async (req, res) => {
     });
   } catch (error) {
     console.error("updateUserAddress error:", error);
+    if (error?.name === "ValidationError") {
+      const msg = Object.values(error.errors).map((e) => e.message).join("، ");
+      return res.status(400).json({ error: msg });
+    }
     res.status(500).json({ message: "Internal Server Error", error });
   }
 };

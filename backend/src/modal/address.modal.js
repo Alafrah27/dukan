@@ -19,21 +19,23 @@ const addressSchema = new Schema(
       default: "",
       trim: true,
     },
+    // All address data must be provided by the customer — no hardcoded defaults
     destination: {
-      country: { type: String, default: "السعودية" },
-      city: { type: String, default: "" },
-      district: { type: String, default: "" },
-      postalcode: { type: String, default: "" },
-      street1: { type: String, default: "" },
-      state: { type: String, default: "" },
+      country: { type: String, required: [true, "الدولة مطلوبة"], trim: true },
+      city: { type: String, required: [true, "المدينة مطلوبة"], trim: true },
+      district: { type: String, trim: true },
+      postalcode: { type: String, required: [true, "الرمز البريدي مطلوب"], trim: true },
+      street1: { type: String, required: [true, "اسم الشارع مطلوب"], trim: true },
+      state: { type: String, trim: true },
     },
     coordinates: {
-      latitude: { type: Number },
-      longitude: { type: Number },
+      latitude: { type: Number, min: -90, max: 90 },
+      longitude: { type: Number, min: -180, max: 180 },
     },
     phonenumber: {
       type: String,
-      default: "",
+      required: [true, "رقم الجوال مطلوب"],
+      trim: true,
     },
     isDefault: {
       type: Boolean,
