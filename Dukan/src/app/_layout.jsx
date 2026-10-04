@@ -16,7 +16,7 @@ import { useSyncUser } from "../store/userQuery";
 import "../../global.css";
 
 // Prevent the native splash screen from auto-hiding before auth and font loading are ready
-SplashScreen.preventAutoHideAsync().catch(() => {});
+SplashScreen.preventAutoHideAsync().catch(() => { });
 
 // Complete any pending auth sessions on web/native
 WebBrowser.maybeCompleteAuthSession();
@@ -41,22 +41,25 @@ function NavigationGate({ fontsLoaded }) {
       return;
     }
 
-    const inCustomerGroup = segments[0] === "customer";
+    const inAuthGroup =
+      segments[0] === "customer" ||
+      segments[0] === "address" ||
+      segments[0] === "(myorders)";
 
     if (isSignedIn) {
       try {
         syncUser();
-      } catch (_) {}
+      } catch (_) { }
 
-      if (!inCustomerGroup) {
+      if (!inAuthGroup) {
         router.replace("/customer/home");
       }
-    } else if (inCustomerGroup) {
+    } else if (inAuthGroup) {
       router.replace("/");
     }
 
     setIsReady(true);
-    SplashScreen.hideAsync().catch(() => {});
+    SplashScreen.hideAsync().catch(() => { });
   }, [fontsLoaded, isAuthLoaded, isSignedIn]);
 
   if (!fontsLoaded || !isAuthLoaded || !isReady) {
@@ -67,6 +70,7 @@ function NavigationGate({ fontsLoaded }) {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="customer" />
+      <Stack.Screen name="address" />
       <Stack.Screen name="sso-callback" />
     </Stack>
   );

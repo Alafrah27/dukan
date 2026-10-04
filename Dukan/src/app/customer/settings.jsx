@@ -551,6 +551,7 @@ export default function CustomerSettings() {
           {/* 2. Shipping Addresses link */}
           <TouchableOpacity
             activeOpacity={0.7}
+            onPress={() => router.push("/address")}
             className="flex-row-reverse items-center justify-between p-3.5 border-b border-gray-100"
           >
             <View className="flex-1 flex-row-reverse items-center gap-3">
