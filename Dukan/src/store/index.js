@@ -4,3 +4,4 @@ export * from "./productQuery";
 export * from "./categoryQuery";
 export * from "./cartQuery";
 export * from "./tailoringQuery";
+export * from "./addressQuery";
