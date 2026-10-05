@@ -214,6 +214,18 @@
     "customerHint": "Your Dukan account is ready. Discover our Sudanese and Eritrean collection soon.",
     "adminTitle": "Dukan dashboard",
     "adminHint": "Welcome to your marketplace workspace. Management tools will appear here.",
-    "settings": "Settings"
+    "settings": "Settings",
+    "addAddress": "Add delivery address",
+    "addAddressHint": "Select your location for better experience",
+    "deliverTo": "Delivery location",
+    "search": "Search products",
+    "categories": "Categories",
+    "seeAll": "See all",
+    "products": "Products",
+    "offerPercent": "{{value}}% OFF",
+    "offerFixed": "{{value}} SAR OFF",
+    "productsEmpty": "No products available currently",
+    "productsError": "Failed to load products",
+    "retry": "Retry"
   }
 }

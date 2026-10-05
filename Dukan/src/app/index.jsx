@@ -64,10 +64,12 @@ export default function AuthScreen() {
   // Automatically navigate if user is already signed in
   useEffect(() => {
     if (isLoaded && isSignedIn) {
-      syncUser();
-      router.replace("/customer/home");
+      const timer = setTimeout(() => {
+        router.replace("/customer/home");
+      }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [isLoaded, isSignedIn, router, syncUser]);
+  }, [isLoaded, isSignedIn, router]);
 
   // Generic OAuth handler for Google and Apple
   const handleOAuthSignIn = useCallback(

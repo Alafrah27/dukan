@@ -14,6 +14,7 @@ import { useFonts } from "expo-font";
 import Toast from "react-native-toast-message";
 import { useSyncUser } from "../store/userQuery";
 import "../../global.css";
+import api from "@/lib/axios";
 
 // Prevent the native splash screen from auto-hiding before auth and font loading are ready
 SplashScreen.preventAutoHideAsync().catch(() => { });
@@ -33,45 +34,49 @@ function NavigationGate({ fontsLoaded }) {
   const { isLoaded: isAuthLoaded, isSignedIn } = useAuth();
   const segments = useSegments();
   const router = useRouter();
-  const [isReady, setIsReady] = useState(false);
-  const { mutate: syncUser } = useSyncUser();
 
   useEffect(() => {
     if (!fontsLoaded || !isAuthLoaded) {
       return;
     }
 
-    const inAuthGroup =
-      segments[0] === "customer" ||
-      segments[0] === "address" ||
-      segments[0] === "(myorders)";
+    const isLandingOrLogin = !segments[0] || segments[0] === "index";
+    const isPublicRoute = isLandingOrLogin || segments[0] === "sso-callback";
 
     if (isSignedIn) {
-      try {
-        syncUser();
-      } catch (_) { }
+      // Sync user profile in backend silently
+      api.post("/user", {}).catch(() => { });
 
-      if (!inAuthGroup) {
-        router.replace("/customer/home");
+      // Only redirect signed-in users away from the landing / sign-in screen
+      if (isLandingOrLogin) {
+        const timer = setTimeout(() => {
+          router.replace("/customer/home");
+        }, 0);
+        return () => clearTimeout(timer);
       }
-    } else if (inAuthGroup) {
-      router.replace("/");
+    } else if (!isPublicRoute) {
+      // Redirect unauthenticated users away from protected screens to login
+      const timer = setTimeout(() => {
+        router.replace("/");
+      }, 0);
+      return () => clearTimeout(timer);
     }
 
-    setIsReady(true);
     SplashScreen.hideAsync().catch(() => { });
-  }, [fontsLoaded, isAuthLoaded, isSignedIn]);
+  }, [fontsLoaded, isAuthLoaded, isSignedIn, segments]);
 
-  if (!fontsLoaded || !isAuthLoaded || !isReady) {
+  if (!fontsLoaded || !isAuthLoaded) {
     return null;
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack screenOptions={{ headerShown: false, animation: "fade" }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="customer" />
       <Stack.Screen name="address" />
       <Stack.Screen name="sso-callback" />
+      <Stack.Screen name="search" />
+      <Stack.Screen name="[id]" />
     </Stack>
   );
 }
