@@ -5,6 +5,7 @@ import Product from "../modal/products.modal.js";
 import TailoringPrice from "../modal/tailoring.modal.js";
 import User from "../modal/user.modal.js";
 import Address from "../modal/address.modal.js";
+import shippingService from "../services/shipping/shipping.service.js";
 
 const CART_PRODUCT_FIELDS = "name images basePrice isAvailable purchaseoption";
 
@@ -142,6 +143,106 @@ const resolveAddressForUser = async (userId, addressId) => {
   return { address };
 };
 
+/**
+ * Helper to calculate cart subtotal, tailoring fees, shipping fee, and final cost
+ */
+export const calculateCartSummary = async (cart) => {
+  if (!cart) return null;
+
+  const productIds = (cart.items || [])
+    .map((i) => i.product?._id || i.product)
+    .filter(Boolean);
+
+  const tailoringDocs = await TailoringPrice.find({
+    $or: [{ productId: { $in: productIds } }, { productId: null }],
+    isActive: true,
+  });
+
+  const getTailoringPrice = (productId, sizeType) => {
+    if (!sizeType) return 0;
+    const prodDoc = tailoringDocs.find(
+      (d) => String(d.productId) === String(productId)
+    );
+    if (prodDoc) {
+      if (Array.isArray(prodDoc.sizeType)) {
+        const found = prodDoc.sizeType.find(
+          (s) => (s.type || s.sizeType) === sizeType
+        );
+        if (found && found.price !== undefined) return Number(found.price);
+      } else if (prodDoc.sizeType === sizeType) {
+        return Number(prodDoc.price) || 0;
+      }
+    }
+    const globalDoc = tailoringDocs.find((d) => !d.productId);
+    if (globalDoc) {
+      if (Array.isArray(globalDoc.sizeType)) {
+        const found = globalDoc.sizeType.find(
+          (s) => (s.type || s.sizeType) === sizeType
+        );
+        if (found && found.price !== undefined) return Number(found.price);
+      } else if (globalDoc.sizeType === sizeType) {
+        return Number(globalDoc.price) || 0;
+      }
+    }
+    return 0;
+  };
+
+  let subtotal = 0;
+  let tailoringTotal = 0;
+  let totalItemsCount = 0;
+
+  const itemsDetails = (cart.items || []).map((item) => {
+    const qty = Number(item.quantity) || 1;
+    totalItemsCount += qty;
+    const basePrice = Number(item.product?.basePrice) || 0;
+    const isTailored =
+      item.purchaseOption === "farbic_with_stiching" ||
+      (typeof item.purchaseOption === "string" && item.purchaseOption.includes("stich"));
+
+    const tailoringUnitPrice = isTailored
+      ? getTailoringPrice(item.product?._id || item.product, item.tailoringSizeType)
+      : 0;
+
+    const itemBaseTotal = basePrice * qty;
+    const itemTailoringTotal = tailoringUnitPrice * qty;
+    const itemTotalPrice = (basePrice + tailoringUnitPrice) * qty;
+
+    subtotal += itemBaseTotal;
+    tailoringTotal += itemTailoringTotal;
+
+    return {
+      itemId: item._id,
+      productId: item.product?._id || item.product,
+      productName: item.product?.name || "",
+      basePrice,
+      tailoringUnitPrice,
+      unitPrice: basePrice + tailoringUnitPrice,
+      quantity: qty,
+      itemTotal: itemTotalPrice,
+      tailoringSizeType: item.tailoringSizeType || null,
+      isTailored,
+    };
+  });
+
+  const shippingFee =
+    cart.aramex && typeof cart.aramex.price === "number"
+      ? Number(cart.aramex.price)
+      : 0;
+  const itemsTotalWithTailoring = subtotal + tailoringTotal;
+  const finalTotal = itemsTotalWithTailoring + shippingFee;
+
+  return {
+    itemsCount: totalItemsCount,
+    itemsSubtotal: subtotal,
+    tailoringTotal,
+    itemsTotalWithTailoring,
+    shippingFee,
+    finalTotal,
+    currency: cart.aramex?.currency || "SAR",
+    itemsDetails,
+  };
+};
+
 export const getCart = async (req, res) => {
   try {
     const user = await getCartUser(req, res);
@@ -163,7 +264,9 @@ export const getCart = async (req, res) => {
       }
     }
 
-    return res.status(200).json({ success: true, cart });
+    const summary = await calculateCartSummary(cart);
+
+    return res.status(200).json({ success: true, cart, summary });
   } catch (error) {
     return handleCartError(res, error, "getCart");
   }
@@ -490,3 +593,147 @@ export const clearCart = async (req, res) => {
     return handleCartError(res, error, "clearCart");
   }
 };
+
+/**
+ * Calculate Aramex shipping price for the customer cart
+ * - Box size is fixed from admin: 45cm (45x45x45 cm)
+ * - User can change: kilo (weight in kg), countryCode, city, postalCode
+ * - Saves calculation in cart.aramex and returns updated cart and final cost summary
+ */
+export const calculateCartShipping = async (req, res) => {
+  try {
+    const user = await getCartUser(req, res);
+    if (!user) return;
+
+    let cart = await Cart.findOne({ userId: user._id })
+      .populate("addressId")
+      .populate("items.product", `${CART_PRODUCT_FIELDS} masurmentConfig`);
+
+    if (!cart) {
+      return res.status(404).json({ error: "السلة غير موجودة" });
+    }
+
+    const {
+      kilo = 1,
+      countryCode,
+      country,
+      city,
+      postalCode,
+    } = req.body;
+
+    const linkedAddress = cart.addressId;
+    const rawCountry = (
+      countryCode ||
+      country ||
+      linkedAddress?.destination?.country ||
+      linkedAddress?.countryCode ||
+      linkedAddress?.country ||
+      "SA"
+    ).trim();
+
+    // Map common country names to 2-letter ISO codes if needed
+    const countryMapping = {
+      "المملكة العربية السعودية": "SA",
+      "السعودية": "SA",
+      "saudi arabia": "SA",
+      "الإمارات العربية المتحدة": "AE",
+      "الإمارات": "AE",
+      "uae": "AE",
+      "الكويت": "KW",
+      "kuwait": "KW",
+      "البحرين": "BH",
+      "bahrain": "BH",
+      "قطر": "QA",
+      "qatar": "QA",
+      "عُمان": "OM",
+      "عمان": "OM",
+      "oman": "OM",
+      "جمهورية مصر العربية": "EG",
+      "مصر": "EG",
+      "egypt": "EG",
+      "المملكة الأردنية الهاشمية": "JO",
+      "الأردن": "JO",
+      "jordan": "JO",
+      "السودان": "SD",
+      "sudan": "SD",
+    };
+
+    const destCountryCode = (
+      countryMapping[rawCountry] ||
+      countryMapping[rawCountry.toLowerCase()] ||
+      (rawCountry.length === 2 ? rawCountry.toUpperCase() : "SA")
+    );
+
+    const destCity = (
+      city ||
+      linkedAddress?.destination?.city ||
+      linkedAddress?.city ||
+      "Riyadh"
+    ).trim();
+
+    const destPostalCode = (
+      postalCode !== undefined
+        ? String(postalCode)
+        : (linkedAddress?.destination?.postalcode || linkedAddress?.postalCode || "")
+    ).trim();
+
+    const actualWeight = Math.max(0.1, Number(kilo) || 1);
+    const boxSize = 45; // Fixed 45cm from admin
+
+    // Calculate quote via Aramex provider
+    const quotes = await shippingService.getQuotes({
+      destination: {
+        countryCode: destCountryCode,
+        city: destCity,
+        postalCode: destPostalCode,
+      },
+      packageDetails: {
+        weight: actualWeight,
+        length: boxSize,
+        width: boxSize,
+        height: boxSize,
+        numberOfPieces: 1,
+        shipmentType: "parcel",
+      },
+      currency: "SAR",
+      provider: "aramex",
+    });
+
+    const quote = quotes?.[0];
+    if (!quote || quote.price === undefined) {
+      return res.status(400).json({
+        error: "تعذر احتساب سعر الشحن عبر أرامكس، يرجى التحقق من صحة بيانات الوجهة",
+      });
+    }
+
+    cart.aramex = {
+      price: quote.price,
+      currency: quote.currency || "SAR",
+      kilo: actualWeight,
+      boxSize: 45, // Fixed 45cm from admin
+      countryCode: destCountryCode,
+      country: quote.destination?.nameAr || destCountryCode,
+      city: destCity,
+      postalCode: destPostalCode,
+      serviceName: quote.serviceName || "Aramex Express",
+      estimatedDays: quote.estimatedDays || "1-3 أيام عمل",
+      isCalculated: true,
+      calculatedAt: new Date(),
+    };
+
+    await cart.save();
+
+    const summary = await calculateCartSummary(cart);
+
+    return res.status(200).json({
+      success: true,
+      message: "تم احتساب تكلفة الشحن بنجاح",
+      aramex: cart.aramex,
+      cart,
+      summary,
+    });
+  } catch (error) {
+    return handleCartError(res, error, "calculateCartShipping");
+  }
+};
+

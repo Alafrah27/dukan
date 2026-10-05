@@ -101,3 +101,23 @@ export const useClearCart = () => {
     },
   });
 };
+
+/**
+ * Hook to calculate Aramex shipping for the cart
+ * Box size is fixed from admin at 45cm (45x45x45 cm)
+ * Allows customizing weight (kilo), country, city, postal code
+ */
+export const useCalculateCartShipping = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload) => {
+      const response = await api.post("/cart/calculate-shipping", payload);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [CART_QUERY_KEY] });
+    },
+  });
+};
+

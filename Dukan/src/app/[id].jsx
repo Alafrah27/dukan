@@ -523,9 +523,8 @@ export default function ProductDetails() {
             {images.map((_, idx) => (
               <View
                 key={idx}
-                className={`w-2 h-2 rounded-full ${
-                  idx === selectedImageIndex ? "bg-white w-4" : "bg-white/50"
-                }`}
+                className={`w-2 h-2 rounded-full ${idx === selectedImageIndex ? "bg-white w-4" : "bg-white/50"
+                  }`}
               />
             ))}
           </View>
@@ -654,11 +653,10 @@ export default function ProductDetails() {
                 <Pressable
                   key={i}
                   onPress={() => setSelectedImageIndex(i)}
-                  className={`w-14 h-14 rounded-xl overflow-hidden border-2 ${
-                    i === selectedImageIndex
+                  className={`w-14 h-14 rounded-xl overflow-hidden border-2 ${i === selectedImageIndex
                       ? "border-primary"
                       : "border-transparent opacity-60"
-                  }`}
+                    }`}
                 >
                   <Image
                     source={{ uri: img }}
@@ -684,23 +682,21 @@ export default function ProductDetails() {
             ) : <View />}
 
             <View
-              className={`px-3 py-1 rounded-full ${
-                product.isAvailable ? "bg-green-100" : "bg-red-100"
-              }`}
+              className={`px-3 py-1 rounded-full ${product.isAvailable ? "bg-green-100" : "bg-red-100"
+                }`}
             >
               <DukanText
                 medium
-                className={`text-[11px] ${
-                  product.isAvailable ? "text-green-700" : "text-red-700"
-                }`}
+                className={`text-[11px] ${product.isAvailable ? "text-green-700" : "text-red-700"
+                  }`}
               >
                 {product.isAvailable
                   ? isRtl
                     ? "متوفر في المخزون"
                     : "In Stock"
                   : isRtl
-                  ? "غير متوفر"
-                  : "Out of Stock"}
+                    ? "غير متوفر"
+                    : "Out of Stock"}
               </DukanText>
             </View>
           </View>
@@ -792,17 +788,15 @@ export default function ProductDetails() {
                       key={idx}
                       onPress={() => setSelectedProductSize(sizeOption)}
                       style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
-                      className={`px-4 py-2.5 rounded-xl border ${
-                        isSelected
+                      className={`px-4 py-2.5 rounded-xl border ${isSelected
                           ? "bg-primary border-primary shadow-xs"
                           : "bg-surface/40 border-[rgba(48,37,34,0.1)]"
-                      }`}
+                        }`}
                     >
                       <DukanText
                         bold={isSelected}
-                        className={`text-xs ${
-                          isSelected ? "text-white" : "text-text"
-                        } text-center`}
+                        className={`text-xs ${isSelected ? "text-white" : "text-text"
+                          } text-center`}
                       >
                         {sizeOption}
                       </DukanText>
@@ -848,17 +842,15 @@ export default function ProductDetails() {
                       key={idx}
                       onPress={() => setSelectedProductColor(colorOption)}
                       style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
-                      className={`px-4 py-2.5 rounded-xl border ${
-                        isSelected
+                      className={`px-4 py-2.5 rounded-xl border ${isSelected
                           ? "bg-primary border-primary shadow-xs"
                           : "bg-surface/40 border-[rgba(48,37,34,0.1)]"
-                      }`}
+                        }`}
                     >
                       <DukanText
                         bold={isSelected}
-                        className={`text-xs ${
-                          isSelected ? "text-white" : "text-text"
-                        } text-center`}
+                        className={`text-xs ${isSelected ? "text-white" : "text-text"
+                          } text-center`}
                       >
                         {colorOption}
                       </DukanText>
@@ -891,11 +883,10 @@ export default function ProductDetails() {
                         opacity: pressed ? 0.8 : 1,
                       },
                     ]}
-                    className={`p-4 rounded-2xl border ${
-                      isSelected
+                    className={`p-4 rounded-2xl border ${isSelected
                         ? "bg-white border-primary"
                         : "bg-white/70 border-[rgba(48,37,34,0.08)]"
-                    }`}
+                      }`}
                   >
                     <View
                       className="items-center justify-between"
@@ -906,9 +897,8 @@ export default function ProductDetails() {
                         style={{ flexDirection: row }}
                       >
                         <View
-                          className={`w-11 h-11 rounded-xl items-center justify-center ${
-                            isSelected ? "bg-primary/10" : "bg-gray-100"
-                          }`}
+                          className={`w-11 h-11 rounded-xl items-center justify-center ${isSelected ? "bg-primary/10" : "bg-gray-100"
+                            }`}
                         >
                           {isTailoring ? (
                             <Scissors
@@ -930,9 +920,8 @@ export default function ProductDetails() {
                         <View>
                           <DukanText
                             bold={isSelected}
-                            className={`text-sm ${
-                              isSelected ? "text-primary" : "text-text"
-                            } text-right`}
+                            className={`text-sm ${isSelected ? "text-primary" : "text-text"
+                              } text-right`}
                           >
                             {opt.label}
                           </DukanText>
@@ -942,19 +931,18 @@ export default function ProductDetails() {
                                 ? "خياطة وتفصيل على مقاساتك بدقة (أدخل مقاساتك)"
                                 : "Custom tailored to your measurements"
                               : isRtl
-                              ? "استلام القماش فقط دون خياطة"
-                              : "Fabric piece only without tailoring"}
+                                ? "استلام القماش فقط دون خياطة"
+                                : "Fabric piece only without tailoring"}
                           </DukanText>
                         </View>
                       </View>
 
                       {/* Radio Check Circle */}
                       <View
-                        className={`w-5 h-5 rounded-full items-center justify-center border ${
-                          isSelected
+                        className={`w-5 h-5 rounded-full items-center justify-center border ${isSelected
                             ? "border-primary bg-primary"
                             : "border-gray-300 bg-white"
-                        }`}
+                          }`}
                       >
                         {isSelected && <Check size={12} color="#FFFFFF" />}
                       </View>
@@ -1008,26 +996,23 @@ export default function ProductDetails() {
                           key={sizeKey}
                           onPress={() => setSelectedTailoringSizeType(sizeKey)}
                           style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
-                          className={`px-4 py-2.5 rounded-xl border ${
-                            isSelected
+                          className={`px-4 py-2.5 rounded-xl border ${isSelected
                               ? "bg-primary border-primary shadow-xs"
                               : "bg-surface/50 border-[rgba(48,37,34,0.08)]"
-                          }`}
+                            }`}
                         >
                           <DukanText
                             bold={isSelected}
-                            className={`text-xs ${
-                              isSelected ? "text-white" : "text-text"
-                            } text-center`}
+                            className={`text-xs ${isSelected ? "text-white" : "text-text"
+                              } text-center`}
                           >
                             {sizeLabel}
                           </DukanText>
                           {priceItem.price !== undefined && (
                             <DukanText
                               bold={isSelected}
-                              className={`text-[10px] ${
-                                isSelected ? "text-white/90" : "text-primary"
-                              } text-center mt-0.5`}
+                              className={`text-[10px] ${isSelected ? "text-white/90" : "text-primary"
+                                } text-center mt-0.5`}
                             >
                               +{formatPrice(priceItem.price)} ر.س
                             </DukanText>
@@ -1159,8 +1144,8 @@ export default function ProductDetails() {
                     ? "عدد القطع بنفس المقاسات المحددة"
                     : "Number of pieces with same measurements"
                   : isRtl
-                  ? "عدد القطع المراد شراؤها"
-                  : "Number of pieces to purchase"}
+                    ? "عدد القطع المراد شراؤها"
+                    : "Number of pieces to purchase"}
               </DukanText>
             </View>
 
@@ -1255,19 +1240,7 @@ export default function ProductDetails() {
             className="flex-1 items-center gap-2"
             style={{ flexDirection: row }}
           >
-            {/* Add to Cart Button */}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={isRtl ? "أضف إلى السلة" : "Add to Cart"}
-              onPress={() => executeAddToCart(false)}
-              disabled={isAddingToCart || !product.isAvailable}
-              style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }]}
-              className={`p-3 rounded-2xl border border-primary/20 bg-primary/10 items-center justify-center ${
-                !product.isAvailable ? "opacity-40" : ""
-              }`}
-            >
-               <ShoppingBag size={20} color={Colors.primary} /> 
-            </Pressable>
+
 
             {/* Primary Buy Button: شراء الآن */}
             <Pressable
@@ -1276,13 +1249,12 @@ export default function ProductDetails() {
               onPress={() => executeAddToCart(true)}
               disabled={isAddingToCart || !product.isAvailable}
               style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}
-              className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 px-4 rounded-2xl ${
-                !product.isAvailable
+              className={`flex-1 flex-row items-center justify-center gap-2 py-3.5 px-4 rounded-2xl ${!product.isAvailable
                   ? "bg-gray-300"
                   : isAddingToCart && isBuyingNow
-                  ? "bg-primary/80"
-                  : "bg-primary"
-              }`}
+                    ? "bg-primary/80"
+                    : "bg-primary"
+                }`}
             >
               {isAddingToCart && isBuyingNow ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
