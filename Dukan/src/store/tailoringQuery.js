@@ -20,3 +20,17 @@ export const useGetProductTailoringPrices = (productId) => {
     staleTime: 1000 * 60 * 5,
   });
 };
+
+/**
+ * Fetch global active tailoring prices
+ */
+export const useGetGlobalTailoringPrices = () => {
+  return useQuery({
+    queryKey: [TAILORING_QUERY_KEY, "global"],
+    queryFn: async () => {
+      const response = await api.get("/tailoring/product/global?activeOnly=true");
+      return response.data;
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+};

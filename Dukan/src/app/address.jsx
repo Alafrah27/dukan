@@ -6,7 +6,6 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  Share,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -19,7 +18,6 @@ import {
   Home,
   Briefcase,
   MoreVertical,
-  Share2,
   CheckCircle2,
 } from "lucide-react-native";
 import Toast from "react-native-toast-message";
@@ -262,43 +260,47 @@ export default function AddressScreen() {
   };
 
   // Save Address Submission
-  const handleSaveAddress = async () => {
-    if (!form.street.trim()) {
+  const handleSaveAddress = async (formData) => {
+    const currentForm = formData || form;
+    if (formData) {
+      setForm(formData);
+    }
+    if (!currentForm.street?.trim()) {
       Toast.show({ type: "error", text1: "يرجى كتابة اسم الشارع أو تفاصيل العنوان" });
       return;
     }
-    if (!form.phone.trim()) {
+    if (!currentForm.phone?.trim()) {
       Toast.show({ type: "error", text1: "يرجى كتابة رقم الجوال" });
       return;
     }
-    if (!form.city.trim()) {
+    if (!currentForm.city?.trim()) {
       Toast.show({ type: "error", text1: "يرجى كتابة اسم المدينة" });
       return;
     }
-    if (!form.postalCode.trim()) {
+    if (!currentForm.postalCode?.trim()) {
       Toast.show({ type: "error", text1: "يرجى كتابة الرمز البريدي" });
       return;
     }
-    const country = (form.country || locationInfo.country || "").trim();
+    const country = (currentForm.country || locationInfo.country || "").trim();
     if (!country) {
       Toast.show({ type: "error", text1: "يرجى كتابة اسم الدولة" });
       return;
     }
 
     const payload = {
-      title: form.title,
-      recipientName: form.recipient.trim(),
-      phonenumber: form.phone.trim(),
+      title: currentForm.title || "المنزل",
+      recipientName: (currentForm.recipient || "").trim(),
+      phonenumber: currentForm.phone.trim(),
       destination: {
         country,
-        city: form.city.trim(),
-        district: form.district.trim(),
-        postalcode: form.postalCode.trim(),
-        street1: form.street.trim(),
+        city: currentForm.city.trim(),
+        district: (currentForm.district || "").trim(),
+        postalcode: currentForm.postalCode.trim(),
+        street1: currentForm.street.trim(),
         state: locationInfo.state || "",
       },
       coordinates: centerCoords,
-      isDefault: form.isDefault,
+      isDefault: Boolean(currentForm.isDefault),
     };
 
     try {
@@ -420,14 +422,6 @@ export default function AddressScreen() {
     }
   };
 
-  // Share Address
-  const handleShareAddress = async (address) => {
-    try {
-      const dest = address.destination || {};
-      const shareMessage = `عنوان التوصيل - دكانة:\n${address.title}: ${dest.street1} - ${dest.district} - ${dest.city}\nرقم التواصل: ${address.phonenumber}`;
-      await Share.share({ message: shareMessage });
-    } catch (_) {}
-  };
 
   // Format Address display string
   const formatAddressString = (address) => {
@@ -656,27 +650,17 @@ export default function AddressScreen() {
                     </View>
                   </View>
 
-                  {/* Left side: Share + 3-dots */}
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                    <TouchableOpacity
-                      activeOpacity={0.7}
-                      onPress={() => {
-                        setSelectedAddressForAction(address);
-                        setIsActionModalVisible(true);
-                      }}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <MoreVertical size={18} color="#6B7280" />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      activeOpacity={0.7}
-                      onPress={() => handleShareAddress(address)}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <Share2 size={16} color="#6B7280" />
-                    </TouchableOpacity>
-                  </View>
+                  {/* Left side: 3-dots menu */}
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      setSelectedAddressForAction(address);
+                      setIsActionModalVisible(true);
+                    }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <MoreVertical size={18} color="#6B7280" />
+                  </TouchableOpacity>
                 </View>
 
                 {/* ── Card Body (Selectable) ── */}

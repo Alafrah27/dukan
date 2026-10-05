@@ -56,39 +56,90 @@ const getSizeConfig = (sizeKey) => {
   );
 };
 
-/* ─── Single Tailoring Price Form (Create / Edit) ─── */
+/* ─── Tailoring Price Form (Create / Edit Multiple Sizes) ─── */
 const TailoringPriceForm = ({ initialData, products = [], onSubmit, isLoading }) => {
   const isEditing = Boolean(initialData);
 
   const [productId, setProductId] = useState(
     initialData?.productId?._id || (initialData?.productId ? String(initialData.productId) : "global")
   );
-  const [sizeType, setSizeType] = useState(initialData?.sizeType || "medium");
-  const [price, setPrice] = useState(
-    initialData?.price !== undefined ? String(initialData.price) : ""
-  );
+
+  // Initialize sizes list
+  const [sizes, setSizes] = useState(() => {
+    if (Array.isArray(initialData?.sizeType) && initialData.sizeType.length > 0) {
+      return initialData.sizeType.map((s) => ({
+        type: s.type || s.sizeType || "child",
+        price: s.price !== undefined ? String(s.price) : "",
+      }));
+    }
+    if (typeof initialData?.sizeType === "string") {
+      return [
+        {
+          type: initialData.sizeType,
+          price: initialData.price !== undefined ? String(initialData.price) : "",
+        },
+      ];
+    }
+    // Initial row with empty price so the admin enters their desired price
+    return [{ type: "child", price: "" }];
+  });
+
   const [isActive, setIsActive] = useState(
     initialData?.isActive !== undefined ? initialData.isActive : true
   );
   const [notes, setNotes] = useState(initialData?.notes || "");
 
+  const handleSizeChange = (index, field, value) => {
+    setSizes((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value };
+      return next;
+    });
+  };
+
+  const handleAddSize = (presetType = "adult") => {
+    setSizes((prev) => [...prev, { type: presetType, price: "" }]);
+  };
+
+  const handleRemoveSize = (index) => {
+    setSizes((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleApplyPreset = (presetName) => {
+    if (presetName === "child_adult") {
+      setSizes([
+        { type: "child", price: "" },
+        { type: "adult", price: "" },
+      ]);
+    } else if (presetName === "all_standard") {
+      setSizes([
+        { type: "child", price: "" },
+        { type: "adult", price: "" },
+        { type: "small", price: "" },
+        { type: "medium", price: "" },
+        { type: "large", price: "" },
+      ]);
+    }
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
 
-    if (!sizeType) {
-      showToast.error("يرجى اختيار نوع المقاس");
-      return;
-    }
+    const validSizes = sizes
+      .map((s) => ({
+        type: s.type.trim(),
+        price: Number(s.price),
+      }))
+      .filter((s) => Boolean(s.type) && !isNaN(s.price) && s.price >= 0);
 
-    if (price === "" || isNaN(Number(price)) || Number(price) < 0) {
-      showToast.error("يرجى إدخال سعر صحيح (0 أو أكثر)");
+    if (validSizes.length === 0) {
+      showToast.error("يرجى إدخال سعر صحيح لمقاس واحد على الأقل");
       return;
     }
 
     const payload = {
       productId: productId === "global" ? null : productId,
-      sizeType,
-      price: Number(price),
+      sizeType: validSizes,
       isActive,
       notes: notes.trim(),
     };
@@ -126,53 +177,94 @@ const TailoringPriceForm = ({ initialData, products = [], onSubmit, isLoading })
         </span>
       </div>
 
-      {/* Size Type */}
+      {/* Sizes and Prices List */}
       <div>
-        <label className="mb-1.5 block text-xs font-bold text-text">
-          نوع المقاس <span className="text-rose-500">*</span>
-        </label>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {SIZE_TYPES.map((type) => {
-            const selected = sizeType === type.key;
+        <div className="flex items-center justify-between mb-2">
+          <label className="block text-xs font-bold text-text">
+            المقاسات والأسعار <span className="text-rose-500">*</span>
+          </label>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => handleApplyPreset("child_adult")}
+              className="text-[11px] font-bold text-primary hover:underline px-2 py-0.5 rounded bg-primary/10"
+            >
+              طفل + بالغ
+            </button>
+            <button
+              type="button"
+              onClick={() => handleApplyPreset("all_standard")}
+              className="text-[11px] font-bold text-primary hover:underline px-2 py-0.5 rounded bg-primary/10"
+            >
+              المقاسات القياسية
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
+          {sizes.map((row, index) => {
             return (
-              <button
-                key={type.key}
-                type="button"
-                onClick={() => setSizeType(type.key)}
-                className={`flex flex-col items-center justify-center rounded-xl border p-2.5 text-xs font-medium transition cursor-pointer ${
-                  selected
-                    ? "border-primary bg-primary/10 text-primary font-bold shadow-xs"
-                    : "border-primary/15 bg-white text-text hover:border-primary/30 hover:bg-surface/50"
-                }`}
+              <div
+                key={index}
+                className="flex items-center gap-2 rounded-xl border border-primary/15 bg-white p-2.5 shadow-xs"
               >
-                <span>{type.shortLabel}</span>
-                <span className="text-[10px] text-textSecondary">{type.key}</span>
-              </button>
+                {/* Size Type Selector */}
+                <div className="flex-1">
+                  <select
+                    value={row.type}
+                    onChange={(e) => handleSizeChange(index, "type", e.target.value)}
+                    className="w-full rounded-lg border border-primary/20 bg-background/40 px-2.5 py-1.5 text-xs font-bold text-text outline-none focus:border-primary"
+                  >
+                    <option value="child">👶 طفل (Child)</option>
+                    <option value="adult">🧑 بالغ (Adult)</option>
+                    <option value="small">صغير (Small - S)</option>
+                    <option value="medium">متوسط (Medium - M)</option>
+                    <option value="large">كبير (Large - L)</option>
+                    <option value="xl">كبير جداً (XL)</option>
+                    <option value="xxl">كبير مضاعف (XXL)</option>
+                    <option value="custom">مخصص (Custom)</option>
+                  </select>
+                </div>
+
+                {/* Price Input */}
+                <div className="relative w-32">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    required
+                    value={row.price}
+                    onChange={(e) => handleSizeChange(index, "price", e.target.value)}
+                    placeholder="السعر"
+                    className="w-full rounded-lg border border-primary/20 bg-background/40 py-1.5 pr-2.5 pl-8 text-xs font-bold text-text outline-none focus:border-primary"
+                  />
+                  <span className="absolute top-1/2 left-2 -translate-y-1/2 text-[10px] font-bold text-textSecondary">
+                    ر.س
+                  </span>
+                </div>
+
+                {/* Delete button */}
+                <button
+                  type="button"
+                  onClick={() => handleRemoveSize(index)}
+                  disabled={sizes.length <= 1}
+                  className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition disabled:opacity-30 cursor-pointer"
+                  title="حذف هذا المقاس"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
             );
           })}
         </div>
-      </div>
 
-      {/* Price Input */}
-      <div>
-        <label className="mb-1.5 block text-xs font-bold text-text">
-          تكلفة التفصيل (ر.س) <span className="text-rose-500">*</span>
-        </label>
-        <div className="relative">
-          <input
-            type="number"
-            min="0"
-            step="0.5"
-            required
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="مثال: 50"
-            className="w-full rounded-xl border border-primary/20 bg-background/50 py-2.5 pr-3.5 pl-12 text-xs font-semibold text-text outline-none transition focus:border-primary focus:bg-white focus:ring-2 focus:ring-primary/15"
-          />
-          <span className="absolute top-1/2 left-3 -translate-y-1/2 text-xs font-bold text-textSecondary">
-            ر.س
-          </span>
-        </div>
+        <button
+          type="button"
+          onClick={() => handleAddSize()}
+          className="mt-2.5 inline-flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary/80 transition cursor-pointer"
+        >
+          <Plus size={14} /> إضافة مقاس آخر
+        </button>
       </div>
 
       {/* Active Toggle */}
@@ -233,23 +325,35 @@ const BulkPricingModal = ({ products = [], existingPrices = [], onSubmit, isLoad
     products[0]?._id || "global"
   );
 
-  // Quick defaults: standard sizes
-  const targetSizes = ["child", "small", "medium", "large", "adult"];
+  // Quick defaults: child, adult, and standard sizes
+  const targetSizes = ["child", "adult", "small", "medium", "large", "xl"];
+
+  const getPriceForProductAndSize = (prodId, size) => {
+    const matchDoc = existingPrices.find((p) =>
+      prodId === "global"
+        ? !p.productId
+        : (p.productId?._id || p.productId) === prodId
+    );
+    if (!matchDoc) return "";
+    if (Array.isArray(matchDoc.sizeType)) {
+      const item = matchDoc.sizeType.find(
+        (s) => (s.type || s.sizeType) === size
+      );
+      return item?.price !== undefined ? String(item.price) : "";
+    }
+    if (matchDoc.sizeType === size) {
+      return matchDoc.price !== undefined ? String(matchDoc.price) : "";
+    }
+    return "";
+  };
 
   // Initialize prices map from existing prices for this product if any
   const [matrix, setMatrix] = useState(() => {
     const initial = {};
     targetSizes.forEach((size) => {
-      const match = existingPrices.find(
-        (p) =>
-          p.sizeType === size &&
-          (selectedProductId === "global"
-            ? !p.productId
-            : (p.productId?._id || p.productId) === selectedProductId)
-      );
       initial[size] = {
-        price: match ? String(match.price) : "",
-        isActive: match ? match.isActive : true,
+        price: getPriceForProductAndSize(selectedProductId, size),
+        isActive: true,
       };
     });
     return initial;
@@ -259,16 +363,9 @@ const BulkPricingModal = ({ products = [], existingPrices = [], onSubmit, isLoad
     setSelectedProductId(newProductId);
     const updated = {};
     targetSizes.forEach((size) => {
-      const match = existingPrices.find(
-        (p) =>
-          p.sizeType === size &&
-          (newProductId === "global"
-            ? !p.productId
-            : (p.productId?._id || p.productId) === newProductId)
-      );
       updated[size] = {
-        price: match ? String(match.price) : "",
-        isActive: match ? match.isActive : true,
+        price: getPriceForProductAndSize(newProductId, size),
+        isActive: true,
       };
     });
     setMatrix(updated);
@@ -296,6 +393,7 @@ const BulkPricingModal = ({ products = [], existingPrices = [], onSubmit, isLoad
       const item = matrix[size];
       if (item && item.price !== "" && !isNaN(Number(item.price))) {
         pricesToSubmit.push({
+          type: size,
           sizeType: size,
           price: Number(item.price),
           isActive: Boolean(item.isActive),
@@ -598,11 +696,20 @@ function Tailoring() {
     const total = pagination.totalItems || tailoringPrices.length;
     const active = tailoringPrices.filter((p) => p.isActive).length;
     const inactive = tailoringPrices.length - active;
-    const avgPrice =
-      tailoringPrices.length > 0
-        ? tailoringPrices.reduce((sum, p) => sum + (p.price || 0), 0) /
-          tailoringPrices.length
-        : 0;
+    let totalPriceSum = 0;
+    let totalCount = 0;
+    tailoringPrices.forEach((p) => {
+      if (Array.isArray(p.sizeType) && p.sizeType.length > 0) {
+        p.sizeType.forEach((s) => {
+          totalPriceSum += Number(s.price) || 0;
+          totalCount += 1;
+        });
+      } else if (p.price !== undefined) {
+        totalPriceSum += Number(p.price) || 0;
+        totalCount += 1;
+      }
+    });
+    const avgPrice = totalCount > 0 ? totalPriceSum / totalCount : 0;
 
     return { total, active, inactive, avgPrice };
   }, [tailoringPrices, pagination.totalItems]);
@@ -663,33 +770,49 @@ function Tailoring() {
       },
       {
         key: "sizeType",
-        label: "المقاس",
-        className: "w-36",
-        headerClassName: "w-36",
+        label: "المقاسات وأسعار التفصيل",
+        className: "min-w-[240px]",
+        headerClassName: "min-w-[240px]",
         render: (item) => {
-          const config = getSizeConfig(item.sizeType);
+          const list =
+            Array.isArray(item.sizeType) && item.sizeType.length > 0
+              ? item.sizeType
+              : typeof item.sizeType === "string"
+              ? [{ type: item.sizeType, price: item.price }]
+              : item.price !== undefined
+              ? [{ type: "custom", price: item.price }]
+              : [];
+
+          if (list.length === 0) {
+            return (
+              <span className="text-xs italic text-textSecondary">
+                لا توجد مقاسات محددة
+              </span>
+            );
+          }
+
           return (
-            <span
-              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold ${config.color}`}
-            >
-              <Tag size={12} />
-              {config.label}
-            </span>
+            <div className="flex flex-wrap items-center gap-1.5 py-1">
+              {list.map((s, idx) => {
+                const sType = s.type || s.sizeType || "custom";
+                const config = getSizeConfig(sType);
+                return (
+                  <span
+                    key={idx}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-bold ${config.color}`}
+                  >
+                    <Tag size={11} className="opacity-70" />
+                    <span>{config.shortLabel || config.label}</span>
+                    <span className="opacity-30">|</span>
+                    <span className="font-extrabold text-emerald-700">
+                      {currencyFormate(s.price || 0)}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
           );
         },
-      },
-      {
-        key: "price",
-        label: "سعر التفصيل",
-        className: "w-32 font-bold",
-        headerClassName: "w-32",
-        render: (item) => (
-          <div className="flex items-baseline gap-1">
-            <span className="text-sm font-bold text-emerald-700">
-              {currencyFormate(item.price)}
-            </span>
-          </div>
-        ),
       },
       {
         key: "isActive",

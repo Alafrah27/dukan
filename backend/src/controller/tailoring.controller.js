@@ -18,6 +18,43 @@ const handleTailoringError = (res, error, action) => {
 };
 
 /**
+ * Helper to normalize sizeType array from request body
+ * Handles:
+ * - [{ type: "child", price: 20 }, { type: "adult", price: 40 }]
+ * - [{ sizeType: "child", price: 20 }]
+ * - single sizeType: "child", price: 20
+ */
+const normalizeSizeTypeArray = (sizeTypeInput, singlePrice) => {
+  if (Array.isArray(sizeTypeInput) && sizeTypeInput.length > 0) {
+    return sizeTypeInput
+      .map((item) => {
+        if (typeof item === "string") {
+          return { type: item.trim(), price: Number(singlePrice) || 0 };
+        }
+        const type = item.type || item.sizeType || item.name || "";
+        const price = Number(item.price);
+        return {
+          type: String(type).trim(),
+          price: Number.isFinite(price) && price >= 0 ? price : 0,
+        };
+      })
+      .filter((item) => Boolean(item.type));
+  }
+
+  if (typeof sizeTypeInput === "string" && sizeTypeInput.trim()) {
+    const price = Number(singlePrice);
+    return [
+      {
+        type: sizeTypeInput.trim(),
+        price: Number.isFinite(price) && price >= 0 ? price : 0,
+      },
+    ];
+  }
+
+  return [];
+};
+
+/**
  * Get all tailoring prices with filtering, search, and pagination
  */
 export const getAllTailoringPrices = async (req, res) => {
@@ -44,9 +81,12 @@ export const getAllTailoringPrices = async (req, res) => {
       }
     }
 
-    // Filter by sizeType
-    if (sizeType && VALID_SIZE_TYPES.includes(sizeType)) {
-      filter.sizeType = sizeType;
+    // Filter by sizeType inside array or legacy field
+    if (sizeType) {
+      filter.$or = [
+        { "sizeType.type": sizeType },
+        { sizeType: sizeType },
+      ];
     }
 
     // Filter by active status
@@ -58,7 +98,7 @@ export const getAllTailoringPrices = async (req, res) => {
     if (search) {
       const searchRegex = { $regex: search.trim(), $options: "i" };
       filter.$or = [
-        { sizeType: searchRegex },
+        { "sizeType.type": searchRegex },
         { notes: searchRegex },
       ];
     }
@@ -67,7 +107,7 @@ export const getAllTailoringPrices = async (req, res) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
     const skip = (pageNum - 1) * limitNum;
 
-    const allowedSortFields = ["createdAt", "price", "sizeType", "updatedAt"];
+    const allowedSortFields = ["createdAt", "updatedAt"];
     const sortField = allowedSortFields.includes(sortBy) ? sortBy : "createdAt";
     const sortOrder = order === "asc" ? 1 : -1;
 
@@ -115,7 +155,6 @@ export const getTailoringPricesByProduct = async (req, res) => {
 
     const prices = await TailoringPrice.find(query)
       .populate("productId", "name images basePrice")
-      .sort({ price: 1 })
       .lean();
 
     return res.status(200).json({
@@ -156,28 +195,17 @@ export const getTailoringPriceById = async (req, res) => {
 };
 
 /**
- * Create a new tailoring price (Admin only)
+ * Create a new tailoring price record or update existing for product
  */
 export const createTailoringPrice = async (req, res) => {
   try {
     const { productId, sizeType, price, isActive = true, notes = "" } = req.body;
 
-    if (!sizeType || price === undefined || price === null) {
-      return res.status(400).json({
-        error: "نوع المقاس والسعر مطلوبان",
-      });
-    }
+    const sizes = normalizeSizeTypeArray(sizeType, price);
 
-    if (!VALID_SIZE_TYPES.includes(sizeType)) {
+    if (sizes.length === 0) {
       return res.status(400).json({
-        error: `نوع المقاس غير مدعوم. الأنواع المدعومة هي: ${VALID_SIZE_TYPES.join(", ")}`,
-      });
-    }
-
-    const numericPrice = Number(price);
-    if (!Number.isFinite(numericPrice) || numericPrice < 0) {
-      return res.status(400).json({
-        error: "يجب أن يكون السعر رقم موجب أو صفر",
+        error: "يجب تحديد نوع المقاس وسعره (مثال: طفل 20 ر.س، بالغ 40 ر.س)",
       });
     }
 
@@ -193,35 +221,41 @@ export const createTailoringPrice = async (req, res) => {
       validProductId = product._id;
     }
 
-    // Check if a record already exists for this product and sizeType
-    const existing = await TailoringPrice.findOne({
+    // Check if a tailoring record already exists for this product (or global)
+    let existing = await TailoringPrice.findOne({
       productId: validProductId,
-      sizeType,
     });
 
     if (existing) {
-      return res.status(409).json({
-        error: "يوجد سعر تفصيل مسجل بالفعل لهذا المقاس والمنتج. يمكنك تعديل السعر القائم بدلاً من إنشاء جديد.",
-        existingId: existing._id,
+      existing.sizeType = sizes;
+      existing.price = sizes[0]?.price || 0;
+      if (isActive !== undefined) existing.isActive = Boolean(isActive);
+      if (notes !== undefined) existing.notes = notes.trim();
+      existing.userId = req.user?._id || existing.userId;
+      await existing.save();
+      await existing.populate("productId", "name images basePrice");
+      return res.status(200).json({
+        success: true,
+        message: "تم تحديث أسعار المقاسات بنجاح",
+        tailoringPrice: existing,
       });
     }
 
     const newPrice = new TailoringPrice({
       userId: req.user?._id,
       productId: validProductId,
-      sizeType,
-      price: numericPrice,
+      sizeType: sizes,
+      price: sizes[0]?.price || 0,
       isActive: Boolean(isActive),
       notes: notes?.trim() || "",
     });
 
     await newPrice.save();
-
     await newPrice.populate("productId", "name images basePrice");
 
     return res.status(201).json({
       success: true,
-      message: "تم إنشاء سعر التفصيل بنجاح",
+      message: "تم إنشاء أسعار المقاسات بنجاح",
       tailoringPrice: newPrice,
     });
   } catch (error) {
@@ -230,7 +264,7 @@ export const createTailoringPrice = async (req, res) => {
 };
 
 /**
- * Update an existing tailoring price (Admin only)
+ * Update an existing tailoring price record
  */
 export const updateTailoringPrice = async (req, res) => {
   try {
@@ -246,23 +280,20 @@ export const updateTailoringPrice = async (req, res) => {
       return res.status(404).json({ error: "سعر التفصيل غير موجود" });
     }
 
-    // Validation if sizeType changed
     if (sizeType !== undefined) {
-      if (!VALID_SIZE_TYPES.includes(sizeType)) {
-        return res.status(400).json({
-          error: `نوع المقاس غير مدعوم. الأنواع المدعومة: ${VALID_SIZE_TYPES.join(", ")}`,
-        });
+      const sizes = normalizeSizeTypeArray(sizeType, price ?? priceRecord.price);
+      if (sizes.length > 0) {
+        priceRecord.sizeType = sizes;
+        priceRecord.price = sizes[0]?.price || 0;
       }
-      priceRecord.sizeType = sizeType;
-    }
-
-    // Validation if price changed
-    if (price !== undefined) {
+    } else if (price !== undefined) {
       const numericPrice = Number(price);
-      if (!Number.isFinite(numericPrice) || numericPrice < 0) {
-        return res.status(400).json({ error: "يجب أن يكون السعر رقم موجب أو صفر" });
+      if (Number.isFinite(numericPrice) && numericPrice >= 0) {
+        priceRecord.price = numericPrice;
+        if (priceRecord.sizeType?.length === 1) {
+          priceRecord.sizeType[0].price = numericPrice;
+        }
       }
-      priceRecord.price = numericPrice;
     }
 
     // Product association
@@ -281,19 +312,6 @@ export const updateTailoringPrice = async (req, res) => {
       }
     }
 
-    // Check duplicate conflict with other records
-    const conflict = await TailoringPrice.findOne({
-      _id: { $ne: priceRecord._id },
-      productId: priceRecord.productId,
-      sizeType: priceRecord.sizeType,
-    });
-
-    if (conflict) {
-      return res.status(409).json({
-        error: "يوجد سعر آخر مسجل بالفعل لنفس المقاس والمنتج",
-      });
-    }
-
     if (isActive !== undefined) {
       priceRecord.isActive = Boolean(isActive);
     }
@@ -307,7 +325,7 @@ export const updateTailoringPrice = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "تم تحديث سعر التفصيل بنجاح",
+      message: "تم تحديث أسعار التفصيل بنجاح",
       tailoringPrice: priceRecord,
     });
   } catch (error) {
@@ -372,7 +390,7 @@ export const deleteTailoringPrice = async (req, res) => {
 
 /**
  * Bulk Upsert Tailoring Prices for a product (Admin only)
- * Enables setting all sizes (e.g. child, small, medium, large) in a single request
+ * Enables setting all sizes (e.g. child: 20, adult: 40) in a single request
  */
 export const bulkUpsertTailoringPrices = async (req, res) => {
   try {
@@ -396,53 +414,35 @@ export const bulkUpsertTailoringPrices = async (req, res) => {
       targetProductId = product._id;
     }
 
-    const operations = [];
-
-    for (const item of prices) {
-      const { sizeType, price, isActive = true, notes = "" } = item;
-
-      if (!sizeType || !VALID_SIZE_TYPES.includes(sizeType)) {
-        return res.status(400).json({
-          error: `المقاس ${sizeType || ""} غير صالح`,
-        });
-      }
-
-      const numericPrice = Number(price);
-      if (!Number.isFinite(numericPrice) || numericPrice < 0) {
-        return res.status(400).json({
-          error: `سعر المقاس ${sizeType} يجب أن يكون رقم موجب أو صفر`,
-        });
-      }
-
-      operations.push(
-        TailoringPrice.findOneAndUpdate(
-          {
-            productId: targetProductId,
-            sizeType,
-          },
-          {
-            $set: {
-              userId: req.user?._id,
-              price: numericPrice,
-              isActive: Boolean(isActive),
-              notes: notes?.trim() || "",
-            },
-          },
-          {
-            upsert: true,
-            new: true,
-            runValidators: true,
-          }
-        )
-      );
+    const sizes = normalizeSizeTypeArray(prices);
+    if (sizes.length === 0) {
+      return res.status(400).json({
+        error: "يجب إدخال سعر واحد على الأقل مع تحديد نوع المقاس",
+      });
     }
 
-    const savedPrices = await Promise.all(operations);
+    const tailoringDoc = await TailoringPrice.findOneAndUpdate(
+      { productId: targetProductId },
+      {
+        $set: {
+          userId: req.user?._id,
+          sizeType: sizes,
+          price: sizes[0]?.price || 0,
+          isActive: true,
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        runValidators: true,
+      }
+    ).populate("productId", "name images basePrice");
 
     return res.status(200).json({
       success: true,
-      message: "تم تحديث أسعار التفصيل بنجاح",
-      tailoringPrices: savedPrices,
+      message: "تم تحديث أسعار المقاسات بنجاح",
+      tailoringPrice: tailoringDoc,
+      tailoringPrices: [tailoringDoc],
     });
   } catch (error) {
     return handleTailoringError(res, error, "bulkUpsertTailoringPrices");

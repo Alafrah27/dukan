@@ -56,19 +56,48 @@ const validateTailoring = async (product, sizeType, measurements) => {
     }
   }
 
-  let tailoringPrice = await TailoringPrice.findOne({
+  let tailoringDoc = await TailoringPrice.findOne({
     productId: product._id,
-    sizeType,
     isActive: true,
   });
-  if (!tailoringPrice) {
-    tailoringPrice = await TailoringPrice.findOne({
+  if (!tailoringDoc) {
+    tailoringDoc = await TailoringPrice.findOne({
       productId: null,
-      sizeType,
       isActive: true,
     });
   }
-  if (!tailoringPrice) return "No active tailoring price found for this size type";
+  if (!tailoringDoc) return "No active tailoring price found";
+
+  let matchedPrice = null;
+  if (Array.isArray(tailoringDoc.sizeType) && tailoringDoc.sizeType.length > 0) {
+    const matched = tailoringDoc.sizeType.find(
+      (s) => (s.type || s.sizeType) === sizeType
+    );
+    if (matched) matchedPrice = matched.price;
+  } else if (tailoringDoc.sizeType === sizeType) {
+    matchedPrice = tailoringDoc.price;
+  }
+
+  if (matchedPrice === null) {
+    const globalDoc = await TailoringPrice.findOne({
+      productId: null,
+      isActive: true,
+    });
+    if (globalDoc) {
+      if (Array.isArray(globalDoc.sizeType) && globalDoc.sizeType.length > 0) {
+        const matched = globalDoc.sizeType.find(
+          (s) => (s.type || s.sizeType) === sizeType
+        );
+        if (matched) matchedPrice = matched.price;
+      } else if (globalDoc.sizeType === sizeType) {
+        matchedPrice = globalDoc.price;
+      }
+    }
+  }
+
+  if (matchedPrice === null) {
+    return `No active tailoring price found for size type: ${sizeType}`;
+  }
 
   return null;
 };
