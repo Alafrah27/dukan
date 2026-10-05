@@ -2,10 +2,16 @@ import mongoose from "mongoose";
 
 const { Schema, model } = mongoose;
 
+export const VALID_SIZE_TYPES = ["child", "adult"];
+
 const sizeOptionSchema = new Schema(
   {
     type: {
       type: String,
+      enum: {
+        values: VALID_SIZE_TYPES,
+        message: "نوع المقاس يجب أن يكون إما طفل (child) أو بالغ (adult)",
+      },
       required: [true, "نوع المقاس مطلوب"],
       trim: true,
     },
@@ -55,9 +61,6 @@ const tailoringPriceSchema = new Schema(
 tailoringPriceSchema.index({ productId: 1 });
 tailoringPriceSchema.index({ "sizeType.type": 1 });
 tailoringPriceSchema.index({ isActive: 1 });
-
-
-
 
 const TailoringPrice = model("TailoringPrice", tailoringPriceSchema);
 

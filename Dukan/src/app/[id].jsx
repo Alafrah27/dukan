@@ -42,22 +42,7 @@ import { buildOfferMap, getDiscountedPrice, formatPrice } from "../utils/offers"
 const SIZE_LABELS = {
   child: { ar: "طفل (Child)", shortAr: "طفل", en: "Child" },
   adult: { ar: "بالغ (Adult)", shortAr: "بالغ", en: "Adult" },
-  small: { ar: "صغير (Small - S)", shortAr: "صغير", en: "Small" },
-  medium: { ar: "متوسط (Medium - M)", shortAr: "متوسط", en: "Medium" },
-  large: { ar: "كبير (Large - L)", shortAr: "كبير", en: "Large" },
-  xl: { ar: "كبير جداً (XL)", shortAr: "XL", en: "XL" },
-  xxl: { ar: "كبير مضاعف (XXL)", shortAr: "XXL", en: "XXL" },
-  custom: { ar: "تفصيل مخصص", shortAr: "مخصص", en: "Custom" },
 };
-
-const ALL_STANDARD_TAILORING_SIZES = [
-  { sizeType: "child", defaultPrice: 40 },
-  { sizeType: "small", defaultPrice: 50 },
-  { sizeType: "medium", defaultPrice: 50 },
-  { sizeType: "large", defaultPrice: 60 },
-  { sizeType: "adult", defaultPrice: 60 },
-  { sizeType: "xl", defaultPrice: 70 },
-];
 
 /**
  * Safely parse sizes / colors from array, JSON string, or comma-separated string

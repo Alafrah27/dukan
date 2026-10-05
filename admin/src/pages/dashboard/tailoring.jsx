@@ -36,13 +36,7 @@ import { currencyFormate } from "../../lib/currencyformate";
 // Standard size types definition with Arabic translation and visual badges
 const SIZE_TYPES = [
   { key: "child", label: "طفل (Child)", shortLabel: "طفل", color: "bg-amber-50 text-amber-700 border-amber-200" },
-  { key: "small", label: "صغير (Small - S)", shortLabel: "صغير", color: "bg-blue-50 text-blue-700 border-blue-200" },
-  { key: "medium", label: "متوسط (Medium - M)", shortLabel: "متوسط", color: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-  { key: "large", label: "كبير (Large - L)", shortLabel: "كبير", color: "bg-purple-50 text-purple-700 border-purple-200" },
   { key: "adult", label: "بالغ (Adult)", shortLabel: "بالغ", color: "bg-teal-50 text-teal-700 border-teal-200" },
-  { key: "xl", label: "كبير جداً (XL)", shortLabel: "XL", color: "bg-rose-50 text-rose-700 border-rose-200" },
-  { key: "xxl", label: "كبير مضاعف (XXL)", shortLabel: "XXL", color: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200" },
-  { key: "custom", label: "تفصيل مخصص (Custom)", shortLabel: "مخصص", color: "bg-slate-50 text-slate-700 border-slate-200" },
 ];
 
 const getSizeConfig = (sizeKey) => {
@@ -110,14 +104,6 @@ const TailoringPriceForm = ({ initialData, products = [], onSubmit, isLoading })
       setSizes([
         { type: "child", price: "" },
         { type: "adult", price: "" },
-      ]);
-    } else if (presetName === "all_standard") {
-      setSizes([
-        { type: "child", price: "" },
-        { type: "adult", price: "" },
-        { type: "small", price: "" },
-        { type: "medium", price: "" },
-        { type: "large", price: "" },
       ]);
     }
   };
@@ -191,13 +177,6 @@ const TailoringPriceForm = ({ initialData, products = [], onSubmit, isLoading })
             >
               طفل + بالغ
             </button>
-            <button
-              type="button"
-              onClick={() => handleApplyPreset("all_standard")}
-              className="text-[11px] font-bold text-primary hover:underline px-2 py-0.5 rounded bg-primary/10"
-            >
-              المقاسات القياسية
-            </button>
           </div>
         </div>
 
@@ -217,12 +196,6 @@ const TailoringPriceForm = ({ initialData, products = [], onSubmit, isLoading })
                   >
                     <option value="child">👶 طفل (Child)</option>
                     <option value="adult">🧑 بالغ (Adult)</option>
-                    <option value="small">صغير (Small - S)</option>
-                    <option value="medium">متوسط (Medium - M)</option>
-                    <option value="large">كبير (Large - L)</option>
-                    <option value="xl">كبير جداً (XL)</option>
-                    <option value="xxl">كبير مضاعف (XXL)</option>
-                    <option value="custom">مخصص (Custom)</option>
                   </select>
                 </div>
 
@@ -325,8 +298,8 @@ const BulkPricingModal = ({ products = [], existingPrices = [], onSubmit, isLoad
     products[0]?._id || "global"
   );
 
-  // Quick defaults: child, adult, and standard sizes
-  const targetSizes = ["child", "adult", "small", "medium", "large", "xl"];
+  // Tailoring size types: child and adult only
+  const targetSizes = ["child", "adult"];
 
   const getPriceForProductAndSize = (prodId, size) => {
     const matchDoc = existingPrices.find((p) =>
