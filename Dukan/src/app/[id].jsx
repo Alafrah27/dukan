@@ -963,40 +963,6 @@ export default function ProductDetails() {
                 );
               })}
             </View>
-
-            {/* Quick banner to switch to tailoring measurements if fabric only is selected */}
-            {!requiresMeasurement && (
-              <Pressable
-                onPress={() => {
-                  const tailoredOpt = purchaseOptions.find(
-                    (opt) => opt.requiremasurment || opt.requiresMeasurements
-                  );
-                  if (tailoredOpt) setSelectedPurchaseOption(tailoredOpt.key);
-                }}
-                style={({ pressed }) => [{ opacity: pressed ? 0.75 : 1 }]}
-                className="mt-3 p-3.5 rounded-2xl bg-primary/10 border border-primary/20 items-center justify-between"
-                style={{ flexDirection: row }}
-              >
-                <View className="items-center gap-2.5" style={{ flexDirection: row }}>
-                  <View className="w-8 h-8 rounded-full bg-primary/20 items-center justify-center">
-                    <Scissors size={16} color={Colors.primary} />
-                  </View>
-                  <View>
-                    <DukanText bold className="text-xs text-primary text-right">
-                      {isRtl ? "تريد تفصيل هذا القماش على مقاسك؟" : "Want custom tailoring?"}
-                    </DukanText>
-                    <DukanText className="text-[10px] text-textSecondary text-right">
-                      {isRtl ? "اضغط هنا لاختيار فئة المقاس وإدخال مقاساتك" : "Tap to choose size category & enter measurements"}
-                    </DukanText>
-                  </View>
-                </View>
-                <ArrowRight
-                  size={16}
-                  color={Colors.primary}
-                  style={{ transform: [{ scaleX: isRtl ? -1 : 1 }] }}
-                />
-              </Pressable>
-            )}
           </View>
 
           {/* ─── TAILORING SIZE & MEASUREMENTS SECTION (IF TAILORED) ─── */}
