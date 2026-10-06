@@ -57,9 +57,9 @@ function Shipping() {
       city: "",
       postalCode: "",
       weight: 1,
-      length: 45, // Fixed 45cm box standard
-      width: 45,
-      height: 45,
+      length: 0, // 0 for standard parcel (calculated on actual weight)
+      width: 0,
+      height: 0,
       numberOfPieces: 1,
     },
   });
@@ -113,9 +113,9 @@ function Shipping() {
       city: "",
       postalCode: "",
       weight: 1,
-      length: 45,
-      width: 45,
-      height: 45,
+      length: 0,
+      width: 0,
+      height: 0,
       numberOfPieces: 1,
     });
     setQuoteResult(null);

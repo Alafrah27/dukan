@@ -32,7 +32,6 @@ const cartItemSchema = new Schema({
 
 /**
  * Aramex shipping calculation details stored in the customer cart
- * The box size is fixed from admin: 45cm (45 x 45 x 45)
  * Dynamic user variables: kilo (weight), country, city, postal code
  */
 const aramexShippingSchema = new Schema(
@@ -40,7 +39,7 @@ const aramexShippingSchema = new Schema(
     price: { type: Number, default: 0 },
     currency: { type: String, default: "SAR" },
     kilo: { type: Number, default: 1 },
-    boxSize: { type: Number, default: 45 }, // Fixed box size 45cm from admin
+    boxSize: { type: Number, default: 0 },
     countryCode: { type: String, default: "SA" },
     country: { type: String, default: "المملكة العربية السعودية" },
     city: { type: String, default: "" },

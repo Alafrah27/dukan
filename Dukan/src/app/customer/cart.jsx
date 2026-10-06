@@ -88,9 +88,7 @@ export default function CustomerCart() {
   const addresses = addressesData?.addresses || [];
   const linkedAddress = cart?.addressId;
 
-  // Aramex Calculator Form State
-  // The box size is FIXED from admin: 45 cm
-  const FIXED_BOX_SIZE = 45;
+  // Aramex Calculator Form State (based on actual weight)
   const [kilo, setKilo] = useState("1");
   const [selectedCountryCode, setSelectedCountryCode] = useState("SA");
   const [city, setCity] = useState("");
@@ -624,20 +622,20 @@ export default function CustomerCart() {
                   </View>
                 </View>
 
-                {/* Fixed Box Badge */}
+                {/* Package Type Badge */}
                 <View className="flex-row items-center gap-1 bg-surface px-2.5 py-1 rounded-full border border-primary/20">
                   <Package size={12} color={Colors.primary} />
                   <DukanText bold className="text-[11px] text-primary">
-                    الصندوق: {FIXED_BOX_SIZE} سم (ثابت)
+                    طرد أرامكس القياسي
                   </DukanText>
                 </View>
               </View>
 
-              {/* Fixed Dimension Note */}
-              <View className="bg-amber-50 rounded-xl p-2.5 mb-3.5 flex-row items-center gap-2 border border-amber-200/50">
-                <ShieldCheck size={16} color="#B45309" />
-                <DukanText className="text-[11px] text-amber-800 flex-1 leading-4">
-                  حجم صندوق الشحن معتمد وثابت من الإدارة ({FIXED_BOX_SIZE}×{FIXED_BOX_SIZE}×{FIXED_BOX_SIZE} سم). يمكنك تغيير الوزن والدولة والمدينة والرمز البريدي فقط.
+              {/* Dynamic Weight Note */}
+              <View className="bg-primary/5 rounded-xl p-2.5 mb-3.5 flex-row items-center gap-2 border border-primary/15">
+                <ShieldCheck size={16} color={Colors.primary} />
+                <DukanText className="text-[11px] text-textSecondary flex-1 leading-4">
+                  يتم احتساب تكلفة الشحن الفعلية ديناميكياً بناءً على الوزن الكلي للطرد ووجهة التوصيل المحددة وفق تسعيرة أرامكس الرسمية.
                 </DukanText>
               </View>
 
@@ -905,7 +903,7 @@ export default function CustomerCart() {
                   <View className="flex-row items-center gap-1">
                     <Truck size={13} color="#E61E28" />
                     <DukanText className="text-xs text-textSecondary">
-                      شحن أرامكس (صندوق 45 سم)
+                      شحن أرامكس السريع
                     </DukanText>
                   </View>
                   {isShippingCalculated ? (

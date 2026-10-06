@@ -678,9 +678,8 @@ export const calculateCartShipping = async (req, res) => {
     ).trim();
 
     const actualWeight = Math.max(0.1, Number(kilo) || 1);
-    const boxSize = 45; // Fixed 45cm from admin
 
-    // Calculate quote via Aramex provider
+    // Calculate quote via Aramex provider based on actual package weight
     const quotes = await shippingService.getQuotes({
       destination: {
         countryCode: destCountryCode,
@@ -689,9 +688,9 @@ export const calculateCartShipping = async (req, res) => {
       },
       packageDetails: {
         weight: actualWeight,
-        length: boxSize,
-        width: boxSize,
-        height: boxSize,
+        length: 0,
+        width: 0,
+        height: 0,
         numberOfPieces: 1,
         shipmentType: "parcel",
       },
@@ -710,7 +709,7 @@ export const calculateCartShipping = async (req, res) => {
       price: quote.price,
       currency: quote.currency || "SAR",
       kilo: actualWeight,
-      boxSize: 45, // Fixed 45cm from admin
+      boxSize: Number(req.body.boxSize) || 0,
       countryCode: destCountryCode,
       country: quote.destination?.nameAr || destCountryCode,
       city: destCity,
