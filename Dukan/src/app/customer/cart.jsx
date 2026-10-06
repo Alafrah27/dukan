@@ -24,6 +24,7 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   RefreshCw,
   Info,
   ShieldCheck,
@@ -33,11 +34,18 @@ import {
   Scale,
   Sparkles,
   ArrowRight,
+  Home,
 } from "lucide-react-native";
 import Toast from "react-native-toast-message";
 import DukanText from "../../components/DukanText";
+import CountryPickerModal from "../../components/customer/CountryPickerModal";
 import Colors from "../../constants/Colors";
 import Fonts from "../../constants/Fonts";
+import {
+  useGetShippingCountries,
+  getCountryFlag,
+  DEFAULT_SHIPPING_COUNTRIES,
+} from "../../store/shippingQuery";
 import {
   useGetCart,
   useUpdateCartItem,
@@ -88,6 +96,47 @@ export default function CustomerCart() {
   const [city, setCity] = useState("");
   const [postalCode, setPostalCode] = useState("");
   const [isAddressesModalOpen, setIsAddressesModalOpen] = useState(false);
+  const [isCountryModalOpen, setIsCountryModalOpen] = useState(false);
+
+  // Fetch countries list via Aramex lookup (same API as Admin)
+  const { data: serverCountries } = useGetShippingCountries();
+  const countries = useMemo(() => {
+    return serverCountries && serverCountries.length > 0
+      ? serverCountries
+      : DEFAULT_SHIPPING_COUNTRIES;
+  }, [serverCountries]);
+
+  // Identify customer's default address
+  const defaultAddress = useMemo(() => {
+    return (
+      addresses.find((a) => a.isDefault) ||
+      (linkedAddress?.isDefault ? linkedAddress : null) ||
+      addresses[0] ||
+      null
+    );
+  }, [addresses, linkedAddress]);
+
+  // Find currently selected country metadata
+  const selectedCountryObj = useMemo(() => {
+    return (
+      countries.find(
+        (c) => (c.code || "").toUpperCase() === (selectedCountryCode || "").toUpperCase()
+      ) || {
+        code: selectedCountryCode || "SA",
+        nameAr: selectedCountryCode === "SA" ? "المملكة العربية السعودية" : selectedCountryCode,
+        nameEn: selectedCountryCode,
+      }
+    );
+  }, [countries, selectedCountryCode]);
+
+  // Check if current selected country matches user's default address country
+  const isSelectedDefaultAddressCountry = useMemo(() => {
+    if (!defaultAddress?.destination?.country) return false;
+    const def = defaultAddress.destination.country.trim().toLowerCase();
+    const selCode = (selectedCountryCode || "").toLowerCase();
+    const selNameAr = (selectedCountryObj.nameAr || "").toLowerCase();
+    return selCode === def || selNameAr === def || (selNameAr && def.includes(selNameAr));
+  }, [defaultAddress, selectedCountryCode, selectedCountryObj]);
 
   // Sync initial calculator values from linked delivery address or cart.aramex
   useEffect(() => {
@@ -104,16 +153,29 @@ export default function CustomerCart() {
       if (dest.city && !city) setCity(dest.city);
       if (dest.postalcode && !postalCode) setPostalCode(dest.postalcode);
       if (dest.country) {
-        const found = POPULAR_COUNTRIES.find(
+        const found = countries.find(
           (c) =>
             c.code.toLowerCase() === dest.country.toLowerCase() ||
-            c.name.includes(dest.country) ||
-            dest.country.includes(c.name)
+            c.nameAr?.includes(dest.country) ||
+            dest.country.includes(c.nameAr || "")
+        );
+        if (found) setSelectedCountryCode(found.code);
+      }
+    } else if (defaultAddress?.destination) {
+      const dest = defaultAddress.destination;
+      if (dest.city && !city) setCity(dest.city);
+      if (dest.postalcode && !postalCode) setPostalCode(dest.postalcode);
+      if (dest.country) {
+        const found = countries.find(
+          (c) =>
+            c.code.toLowerCase() === dest.country.toLowerCase() ||
+            c.nameAr?.includes(dest.country) ||
+            dest.country.includes(c.nameAr || "")
         );
         if (found) setSelectedCountryCode(found.code);
       }
     }
-  }, [linkedAddress, cart?.aramex]);
+  }, [linkedAddress, defaultAddress, cart?.aramex, countries]);
 
   // Handle Quantity Change
   const handleUpdateQuantity = (item, delta) => {
@@ -298,19 +360,9 @@ export default function CustomerCart() {
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-background">
       {/* Top Header */}
-      <View className="flex-row items-center justify-between px-5 py-3 border-b border-surfaceSelected/70 bg-white">
+      <View className="flex-row items-center justify-between px-5 py-3  ">
         <View className="flex-row items-center gap-2">
-          <View className="w-10 h-10 rounded-xl bg-primary/10 items-center justify-center">
-            <ShoppingBag size={20} color={Colors.primary} />
-          </View>
-          <View>
-            <DukanText bold className="text-lg text-text">
-              سلة المشتريات
-            </DukanText>
-            <DukanText className="text-xs text-textSecondary">
-              {items.length > 0 ? `${items.length} منتجات في السلة` : "السلة فارغة"}
-            </DukanText>
-          </View>
+         
         </View>
 
         {items.length > 0 && (
@@ -631,13 +683,74 @@ export default function CustomerCart() {
 
                 {/* 2. Destination Country Selector */}
                 <View>
-                  <DukanText bold className="text-xs text-textSecondary mb-1.5">
-                    دولة الوجهة *
-                  </DukanText>
+                  <View className="flex-row items-center justify-between mb-1.5">
+                    <DukanText bold className="text-xs text-textSecondary">
+                      دولة الوجهة *
+                    </DukanText>
+                    <TouchableOpacity
+                      onPress={() => setIsCountryModalOpen(true)}
+                      className="flex-row items-center gap-1 active:opacity-70"
+                    >
+                      <Globe size={13} color={Colors.primary} />
+                      <DukanText bold className="text-xs text-primary">
+                        عرض جميع الدول ({countries.length})
+                      </DukanText>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Selected Country Active Card */}
+                  <TouchableOpacity
+                    onPress={() => setIsCountryModalOpen(true)}
+                    className="flex-row items-center justify-between p-3 rounded-xl bg-surface/30 border border-surfaceSelected active:opacity-80 mb-2.5"
+                  >
+                    <View className="flex-row items-center gap-2.5 flex-1">
+                      <View className="w-10 h-10 rounded-xl bg-white items-center justify-center border border-surfaceSelected/70 shadow-sm">
+                        <DukanText className="text-xl">
+                          {getCountryFlag(selectedCountryObj.code)}
+                        </DukanText>
+                      </View>
+
+                      <View className="flex-1">
+                        <View className="flex-row items-center gap-2 flex-wrap">
+                          <DukanText bold className="text-sm text-text">
+                            {selectedCountryObj.nameAr || selectedCountryObj.nameEn}
+                          </DukanText>
+
+                          <View className="bg-surface px-1.5 py-0.5 rounded">
+                            <DukanText bold className="text-[10px] text-textSecondary">
+                              {selectedCountryObj.code}
+                            </DukanText>
+                          </View>
+
+                          {isSelectedDefaultAddressCountry && (
+                            <View className="flex-row items-center gap-1 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                              <Home size={10} color="#059669" />
+                              <DukanText bold className="text-[10px] text-emerald-800">
+                                عنوانك الافتراضي
+                              </DukanText>
+                            </View>
+                          )}
+                        </View>
+
+                        <DukanText className="text-[11px] text-textSecondary mt-0.5">
+                          {selectedCountryObj.nameEn || "دولة الشحن المحددة"}
+                        </DukanText>
+                      </View>
+                    </View>
+
+                    <View className="flex-row items-center gap-1 bg-white px-2.5 py-1.5 rounded-lg border border-surfaceSelected shadow-xs">
+                      <DukanText bold className="text-xs text-primary">
+                        تغيير
+                      </DukanText>
+                      <ChevronDown size={14} color={Colors.primary} />
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Quick-select Popular Chips */}
                   <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ gap: 8 }}
+                    contentContainerStyle={{ gap: 6 }}
                     className="flex-row"
                   >
                     {POPULAR_COUNTRIES.map((country) => {
@@ -646,13 +759,13 @@ export default function CustomerCart() {
                         <TouchableOpacity
                           key={country.code}
                           onPress={() => setSelectedCountryCode(country.code)}
-                          className={`flex-row items-center gap-1.5 px-3 py-2 rounded-xl border ${
+                          className={`flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl border ${
                             isSelected
                               ? "bg-primary border-primary"
-                              : "bg-surface/40 border-surfaceSelected"
+                              : "bg-surface/30 border-surfaceSelected/70"
                           }`}
                         >
-                          <DukanText className="text-sm">{country.flag}</DukanText>
+                          <DukanText className="text-xs">{country.flag}</DukanText>
                           <DukanText
                             bold={isSelected}
                             className={`text-xs ${
@@ -664,6 +777,16 @@ export default function CustomerCart() {
                         </TouchableOpacity>
                       );
                     })}
+
+                    <TouchableOpacity
+                      onPress={() => setIsCountryModalOpen(true)}
+                      className="flex-row items-center gap-1 px-3 py-1.5 rounded-xl border border-dashed border-primary/50 bg-primary/5 active:opacity-75"
+                    >
+                      <Globe size={13} color={Colors.primary} />
+                      <DukanText bold className="text-xs text-primary">
+                        + المزيد...
+                      </DukanText>
+                    </TouchableOpacity>
                   </ScrollView>
                 </View>
 
@@ -881,6 +1004,17 @@ export default function CustomerCart() {
           </>
         )}
       </ScrollView>
+
+      {/* Country Picker Modal (Aramex Supported Countries) */}
+      <CountryPickerModal
+        visible={isCountryModalOpen}
+        onClose={() => setIsCountryModalOpen(false)}
+        selectedCountryCode={selectedCountryCode}
+        defaultAddress={defaultAddress}
+        onSelect={(country) => {
+          setSelectedCountryCode(country.code);
+        }}
+      />
     </SafeAreaView>
   );
 }
