@@ -300,7 +300,7 @@ export default function CustomerCart() {
           Toast.show({
             type: "success",
             text1: "تم احتساب الشحن عبر أرامكس بنجاح",
-            text2: `${data?.aramex?.price || 0} ${data?.aramex?.currency || "SAR"} (${data?.aramex?.estimatedDays || "1-3 أيام"})`,
+            text2: `${data?.aramex?.price || 0} ${data?.aramex?.currency || "SAR"} (مدة التوصيل: ${data?.aramex?.estimatedDays || "15 يوم"})`,
             position: "bottom",
           });
         },
@@ -861,7 +861,7 @@ export default function CustomerCart() {
                       </DukanText>
                     </View>
                     <DukanText className="text-[11px] text-green-700">
-                      مدة التوصيل التقديرية: {cart.aramex.estimatedDays || "1-3 أيام عمل"} • الوجهة: {cart.aramex.city || city} ({cart.aramex.countryCode || selectedCountryCode})
+                      مدة التوصيل التقديرية: {cart.aramex.estimatedDays && cart.aramex.estimatedDays.includes("15") ? cart.aramex.estimatedDays : "15 يوم"} • الوجهة: {cart.aramex.city || city} ({cart.aramex.countryCode || selectedCountryCode})
                     </DukanText>
                   </View>
                 )}

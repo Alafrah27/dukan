@@ -716,7 +716,7 @@ export const calculateCartShipping = async (req, res) => {
       city: destCity,
       postalCode: destPostalCode,
       serviceName: quote.serviceName || "Aramex Express",
-      estimatedDays: quote.estimatedDays || "1-3 أيام عمل",
+      estimatedDays: "15 يوم",
       isCalculated: true,
       calculatedAt: new Date(),
     };
