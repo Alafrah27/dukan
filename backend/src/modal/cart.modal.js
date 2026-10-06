@@ -30,6 +30,29 @@ const cartItemSchema = new Schema({
   },
 });
 
+/**
+ * Aramex shipping calculation details stored in the customer cart
+ * The box size is fixed from admin: 45cm (45 x 45 x 45)
+ * Dynamic user variables: kilo (weight), country, city, postal code
+ */
+const aramexShippingSchema = new Schema(
+  {
+    price: { type: Number, default: 0 },
+    currency: { type: String, default: "SAR" },
+    kilo: { type: Number, default: 1 },
+    boxSize: { type: Number, default: 45 }, // Fixed box size 45cm from admin
+    countryCode: { type: String, default: "SA" },
+    country: { type: String, default: "المملكة العربية السعودية" },
+    city: { type: String, default: "" },
+    postalCode: { type: String, default: "" },
+    serviceName: { type: String, default: "Aramex Express" },
+    estimatedDays: { type: String, default: "" },
+    isCalculated: { type: Boolean, default: false },
+    calculatedAt: { type: Date },
+  },
+  { _id: false }
+);
+
 const cartSchema = new Schema(
   {
     userId: {
@@ -38,10 +61,26 @@ const cartSchema = new Schema(
       required: true,
       index: true,
     },
-    addressId : {
-      type : Schema.Types.ObjectId,
-      ref : "Address",
-      required : true,
+    addressId: {
+      type: Schema.Types.ObjectId,
+      ref: "Address",
+      required: true,
+    },
+    aramex: {
+      type: aramexShippingSchema,
+      default: () => ({
+        price: 0,
+        currency: "SAR",
+        kilo: 1,
+        boxSize: 45,
+        countryCode: "SA",
+        country: "المملكة العربية السعودية",
+        city: "",
+        postalCode: "",
+        serviceName: "Aramex Express",
+        estimatedDays: "",
+        isCalculated: false,
+      }),
     },
     items: [cartItemSchema],
   },

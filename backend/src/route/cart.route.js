@@ -6,6 +6,7 @@ import {
   updateCartItem,
   removeFromCart,
   clearCart,
+  calculateCartShipping,
 } from "../controller/cart.controller.js";
 import { protectRoute } from "../middleware/usermiddleware.js";
 
@@ -16,6 +17,12 @@ router.use(protectRoute);
 
 router.get("/", getCart);
 router.post("/", addToCart);
+
+// Calculate Aramex shipping price for the cart
+router.post("/calculate-shipping", calculateCartShipping);
+router.post("/shipping", calculateCartShipping);
+router.put("/aramex", calculateCartShipping);
+router.post("/aramex", calculateCartShipping);
 
 // Update cart delivery address
 router.put("/address", updateCartAddress);

@@ -52,14 +52,14 @@ function Shipping() {
     formState: { errors },
   } = useForm({
     defaultValues: {
-      shipmentType: "document", // 'document' or 'parcel'
+      shipmentType: "parcel", // 'document' or 'parcel'
       countryCode: "",
       city: "",
       postalCode: "",
       weight: 1,
-      length: 12,
-      width: 12,
-      height: 12,
+      length: 45, // Fixed 45cm box standard
+      width: 45,
+      height: 45,
       numberOfPieces: 1,
     },
   });
@@ -108,14 +108,14 @@ function Shipping() {
 
   const handleReset = () => {
     reset({
-      shipmentType: "document",
+      shipmentType: "parcel",
       countryCode: "",
       city: "",
       postalCode: "",
       weight: 1,
-      length: 12,
-      width: 12,
-      height: 12,
+      length: 45,
+      width: 45,
+      height: 45,
       numberOfPieces: 1,
     });
     setQuoteResult(null);
@@ -249,6 +249,9 @@ function Shipping() {
                 <div className="flex items-center gap-2 text-sm font-bold text-text">
                   <Package size={16} className="text-primary" />
                   نوع وتفاصيل الشحنة
+                  <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold text-primary">
+                    مقاس الصندوق الثابت: 45 سم
+                  </span>
                 </div>
 
                 {/* Aramex Document vs Parcel selector */}
