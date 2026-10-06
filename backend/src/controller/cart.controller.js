@@ -70,9 +70,12 @@ const validateTailoring = async (product, sizeType, measurements) => {
   if (!tailoringDoc) return "No active tailoring price found";
 
   let matchedPrice = null;
-  if (Array.isArray(tailoringDoc.sizeType) && tailoringDoc.sizeType.length > 0) {
+  if (
+    Array.isArray(tailoringDoc.sizeType) &&
+    tailoringDoc.sizeType.length > 0
+  ) {
     const matched = tailoringDoc.sizeType.find(
-      (s) => (s.type || s.sizeType) === sizeType
+      (s) => (s.type || s.sizeType) === sizeType,
     );
     if (matched) matchedPrice = matched.price;
   } else if (tailoringDoc.sizeType === sizeType) {
@@ -87,7 +90,7 @@ const validateTailoring = async (product, sizeType, measurements) => {
     if (globalDoc) {
       if (Array.isArray(globalDoc.sizeType) && globalDoc.sizeType.length > 0) {
         const matched = globalDoc.sizeType.find(
-          (s) => (s.type || s.sizeType) === sizeType
+          (s) => (s.type || s.sizeType) === sizeType,
         );
         if (matched) matchedPrice = matched.price;
       } else if (globalDoc.sizeType === sizeType) {
@@ -104,8 +107,15 @@ const validateTailoring = async (product, sizeType, measurements) => {
 };
 
 const handleCartError = (res, error, action) => {
+  if (error.status) {
+    return res
+      .status(error.status)
+      .json({ success: false, error: error.message });
+  }
   if (error.name === "CastError" || error.name === "ValidationError") {
-    return res.status(400).json({ error: error.message || "Invalid cart data" });
+    return res
+      .status(400)
+      .json({ error: error.message || "Invalid cart data" });
   }
   console.error(`${action} error:`, error);
   return res.status(500).json({ error: "Internal server error" });
@@ -122,7 +132,10 @@ const resolveAddressForUser = async (userId, addressId) => {
     }
     const address = await Address.findOne({ _id: addressId, userId });
     if (!address) {
-      return { error: "Address not found or does not belong to user", status: 404 };
+      return {
+        error: "Address not found or does not belong to user",
+        status: 404,
+      };
     }
     return { address };
   }
@@ -135,7 +148,8 @@ const resolveAddressForUser = async (userId, addressId) => {
 
   if (!address) {
     return {
-      error: "An address is required for the cart. Please provide addressId or add an address to your profile first.",
+      error:
+        "An address is required for the cart. Please provide addressId or add an address to your profile first.",
       status: 400,
     };
   }
@@ -161,12 +175,12 @@ export const calculateCartSummary = async (cart) => {
   const getTailoringPrice = (productId, sizeType) => {
     if (!sizeType) return 0;
     const prodDoc = tailoringDocs.find(
-      (d) => String(d.productId) === String(productId)
+      (d) => String(d.productId) === String(productId),
     );
     if (prodDoc) {
       if (Array.isArray(prodDoc.sizeType)) {
         const found = prodDoc.sizeType.find(
-          (s) => (s.type || s.sizeType) === sizeType
+          (s) => (s.type || s.sizeType) === sizeType,
         );
         if (found && found.price !== undefined) return Number(found.price);
       } else if (prodDoc.sizeType === sizeType) {
@@ -177,7 +191,7 @@ export const calculateCartSummary = async (cart) => {
     if (globalDoc) {
       if (Array.isArray(globalDoc.sizeType)) {
         const found = globalDoc.sizeType.find(
-          (s) => (s.type || s.sizeType) === sizeType
+          (s) => (s.type || s.sizeType) === sizeType,
         );
         if (found && found.price !== undefined) return Number(found.price);
       } else if (globalDoc.sizeType === sizeType) {
@@ -197,10 +211,14 @@ export const calculateCartSummary = async (cart) => {
     const basePrice = Number(item.product?.basePrice) || 0;
     const isTailored =
       item.purchaseOption === "farbic_with_stiching" ||
-      (typeof item.purchaseOption === "string" && item.purchaseOption.includes("stich"));
+      (typeof item.purchaseOption === "string" &&
+        item.purchaseOption.includes("stich"));
 
     const tailoringUnitPrice = isTailored
-      ? getTailoringPrice(item.product?._id || item.product, item.tailoringSizeType)
+      ? getTailoringPrice(
+          item.product?._id || item.product,
+          item.tailoringSizeType,
+        )
       : 0;
 
     const itemBaseTotal = basePrice * qty;
@@ -225,7 +243,9 @@ export const calculateCartSummary = async (cart) => {
   });
 
   const shippingFee =
-    cart.aramex && typeof cart.aramex.price === "number"
+    cart.aramex?.isCalculated &&
+    cart.aramex?.isLiveQuote &&
+    typeof cart.aramex.price === "number"
       ? Number(cart.aramex.price)
       : 0;
   const itemsTotalWithTailoring = subtotal + tailoringTotal;
@@ -300,7 +320,7 @@ export const addToCart = async (req, res) => {
     }
 
     const option = product.purchaseoption.find(
-      (opt) => opt.key === purchaseOption
+      (opt) => opt.key === purchaseOption,
     );
     if (!option) {
       return res
@@ -310,27 +330,37 @@ export const addToCart = async (req, res) => {
 
     const parsedQuantity = parseQuantity(quantity);
     if (parsedQuantity === null) {
-      return res.status(400).json({ error: "Quantity must be a positive integer" });
+      return res
+        .status(400)
+        .json({ error: "Quantity must be a positive integer" });
     }
 
     if (option.requiremasurment) {
       const validationError = await validateTailoring(
         product,
         tailoringSizeType,
-        measurements
+        measurements,
       );
-      if (validationError) return res.status(400).json({ error: validationError });
+      if (validationError)
+        return res.status(400).json({ error: validationError });
     }
 
     let cart = await Cart.findOne({ userId: user._id });
 
     // Handle addressId validation and assignment
     if (addressId) {
-      const { address, error, status } = await resolveAddressForUser(user._id, addressId);
+      const { address, error, status } = await resolveAddressForUser(
+        user._id,
+        addressId,
+      );
       if (error) return res.status(status).json({ error });
 
       if (!cart) {
-        cart = new Cart({ userId: user._id, addressId: address._id, items: [] });
+        cart = new Cart({
+          userId: user._id,
+          addressId: address._id,
+          items: [],
+        });
       } else {
         cart.addressId = address._id;
       }
@@ -388,7 +418,10 @@ export const updateCartAddress = async (req, res) => {
       return res.status(400).json({ error: "addressId is required" });
     }
 
-    const { address, error, status } = await resolveAddressForUser(user._id, addressId);
+    const { address, error, status } = await resolveAddressForUser(
+      user._id,
+      addressId,
+    );
     if (error) return res.status(status).json({ error });
 
     let cart = await Cart.findOne({ userId: user._id });
@@ -467,7 +500,7 @@ export const updateCartItem = async (req, res) => {
       const selectedOption =
         purchaseOption === undefined ? item.purchaseOption : purchaseOption;
       const option = product.purchaseoption.find(
-        (option) => option.key === selectedOption
+        (option) => option.key === selectedOption,
       );
       if (!option) {
         return res
@@ -485,7 +518,7 @@ export const updateCartItem = async (req, res) => {
         const validationError = await validateTailoring(
           product,
           selectedSize,
-          selectedMeasurements
+          selectedMeasurements,
         );
         if (validationError)
           return res.status(400).json({ error: validationError });
@@ -502,7 +535,10 @@ export const updateCartItem = async (req, res) => {
     if (note !== undefined) item.note = note;
 
     if (addressId) {
-      const { address, error, status } = await resolveAddressForUser(user._id, addressId);
+      const { address, error, status } = await resolveAddressForUser(
+        user._id,
+        addressId,
+      );
       if (error) return res.status(status).json({ error });
       cart.addressId = address._id;
     } else if (!cart.addressId) {
@@ -569,7 +605,9 @@ export const clearCart = async (req, res) => {
 
     const cart = await Cart.findOne({ userId: user._id });
     if (!cart) {
-      return res.status(200).json({ success: true, message: "Cart is already empty" });
+      return res
+        .status(200)
+        .json({ success: true, message: "Cart is already empty" });
     }
 
     cart.items = [];
@@ -596,8 +634,7 @@ export const clearCart = async (req, res) => {
 
 /**
  * Calculate Aramex shipping price for the customer cart
- * - Box size is fixed from admin: 45cm (45x45x45 cm)
- * - User can change: kilo (weight in kg), countryCode, city, postalCode
+ * - User can change: kilo (weight in kg), countryCode, city, postalCode, state
  * - Saves calculation in cart.aramex and returns updated cart and final cost summary
  */
 export const calculateCartShipping = async (req, res) => {
@@ -612,6 +649,9 @@ export const calculateCartShipping = async (req, res) => {
     if (!cart) {
       return res.status(404).json({ error: "السلة غير موجودة" });
     }
+    if (!cart.items.length) {
+      return res.status(400).json({ error: "السلة فارغة" });
+    }
 
     const {
       kilo = 1,
@@ -619,65 +659,63 @@ export const calculateCartShipping = async (req, res) => {
       country,
       city,
       postalCode,
-    } = req.body;
+      stateOrProvinceCode,
+    } = req.body || {};
 
     const linkedAddress = cart.addressId;
-    const rawCountry = (
+    const rawCountry =
       countryCode ||
       country ||
       linkedAddress?.destination?.country ||
       linkedAddress?.countryCode ||
       linkedAddress?.country ||
-      "SA"
-    ).trim();
+      "";
+    if (typeof rawCountry !== "string") {
+      return res.status(400).json({ error: "رمز الدولة غير صالح" });
+    }
+    const normalizedCountry = rawCountry.trim();
 
     // Map common country names to 2-letter ISO codes if needed
     const countryMapping = {
       "المملكة العربية السعودية": "SA",
-      "السعودية": "SA",
+      السعودية: "SA",
       "saudi arabia": "SA",
       "الإمارات العربية المتحدة": "AE",
-      "الإمارات": "AE",
-      "uae": "AE",
-      "الكويت": "KW",
-      "kuwait": "KW",
-      "البحرين": "BH",
-      "bahrain": "BH",
-      "قطر": "QA",
-      "qatar": "QA",
-      "عُمان": "OM",
-      "عمان": "OM",
-      "oman": "OM",
+      الإمارات: "AE",
+      uae: "AE",
+      الكويت: "KW",
+      kuwait: "KW",
+      البحرين: "BH",
+      bahrain: "BH",
+      قطر: "QA",
+      qatar: "QA",
+      عُمان: "OM",
+      عمان: "OM",
+      oman: "OM",
       "جمهورية مصر العربية": "EG",
-      "مصر": "EG",
-      "egypt": "EG",
+      مصر: "EG",
+      egypt: "EG",
       "المملكة الأردنية الهاشمية": "JO",
-      "الأردن": "JO",
-      "jordan": "JO",
-      "السودان": "SD",
-      "sudan": "SD",
+      الأردن: "JO",
+      jordan: "JO",
+      السودان: "SD",
+      sudan: "SD",
     };
 
-    const destCountryCode = (
-      countryMapping[rawCountry] ||
-      countryMapping[rawCountry.toLowerCase()] ||
-      (rawCountry.length === 2 ? rawCountry.toUpperCase() : "SA")
-    );
+    const destCountryCode =
+      countryMapping[normalizedCountry] ||
+      countryMapping[normalizedCountry.toLowerCase()] ||
+      normalizedCountry.toUpperCase();
 
-    const destCity = (
-      city ||
-      linkedAddress?.destination?.city ||
-      linkedAddress?.city ||
-      "Riyadh"
-    ).trim();
+    const destCity =
+      city || linkedAddress?.destination?.city || linkedAddress?.city || "";
 
-    const destPostalCode = (
+    const destPostalCode =
       postalCode !== undefined
-        ? String(postalCode)
-        : (linkedAddress?.destination?.postalcode || linkedAddress?.postalCode || "")
-    ).trim();
-
-    const actualWeight = Math.max(0.1, Number(kilo) || 1);
+        ? postalCode
+        : linkedAddress?.destination?.postalcode ||
+          linkedAddress?.postalCode ||
+          "";
 
     // Calculate quote via Aramex provider based on actual package weight
     const quotes = await shippingService.getQuotes({
@@ -685,12 +723,13 @@ export const calculateCartShipping = async (req, res) => {
         countryCode: destCountryCode,
         city: destCity,
         postalCode: destPostalCode,
+        stateOrProvinceCode:
+          stateOrProvinceCode ?? linkedAddress?.destination?.state ?? "",
+        addressLine1: linkedAddress?.destination?.street1 || "",
       },
       packageDetails: {
-        weight: actualWeight,
-        length: 0,
-        width: 0,
-        height: 0,
+        weight: kilo,
+        weightUnit: "KG",
         numberOfPieces: 1,
         shipmentType: "parcel",
       },
@@ -701,21 +740,31 @@ export const calculateCartShipping = async (req, res) => {
     const quote = quotes?.[0];
     if (!quote || quote.price === undefined) {
       return res.status(400).json({
-        error: "تعذر احتساب سعر الشحن عبر أرامكس، يرجى التحقق من صحة بيانات الوجهة",
+        error:
+          "تعذر احتساب سعر الشحن عبر أرامكس، يرجى التحقق من صحة بيانات الوجهة",
       });
     }
 
     cart.aramex = {
       price: quote.price,
       currency: quote.currency || "SAR",
-      kilo: actualWeight,
-      boxSize: Number(req.body.boxSize) || 0,
+      kilo: quote.weight,
+      boxSize: 0,
       countryCode: destCountryCode,
       country: quote.destination?.nameAr || destCountryCode,
-      city: destCity,
-      postalCode: destPostalCode,
+      city: quote.destination.city,
+      postalCode: destPostalCode.trim(),
+      stateOrProvinceCode: (
+        stateOrProvinceCode ??
+        linkedAddress?.destination?.state ??
+        ""
+      ).trim(),
       serviceName: quote.serviceName || "Aramex Express",
-      estimatedDays: "15 يوم",
+      estimatedDays: quote.estimatedDays || "",
+      productGroup: quote.productGroup,
+      productType: quote.productType,
+      isLiveQuote: quote.isLiveQuote,
+      isSandbox: quote.isSandbox,
       isCalculated: true,
       calculatedAt: new Date(),
     };
@@ -735,4 +784,3 @@ export const calculateCartShipping = async (req, res) => {
     return handleCartError(res, error, "calculateCartShipping");
   }
 };
-

@@ -67,7 +67,22 @@ const ARABIC_COUNTRY_NAMES = {
 
 const GCC_CODES = new Set(["SA", "AE", "KW", "BH", "QA", "OM"]);
 const ARAB_CODES = new Set([
-  "EG", "JO", "SD", "IQ", "LB", "YE", "MA", "TN", "DZ", "LY", "SY", "PS", "MR", "SO", "DJ", "KM"
+  "EG",
+  "JO",
+  "SD",
+  "IQ",
+  "LB",
+  "YE",
+  "MA",
+  "TN",
+  "DZ",
+  "LY",
+  "SY",
+  "PS",
+  "MR",
+  "SO",
+  "DJ",
+  "KM",
 ]);
 
 const getCountryZone = (code) => {
@@ -76,15 +91,17 @@ const getCountryZone = (code) => {
   return "international";
 };
 
-// Complete preloaded list of official Aramex countries
-const FALLBACK_COUNTRIES = Object.entries(ARABIC_COUNTRY_NAMES).map(([code, nameAr]) => {
-  return {
-    code,
-    nameAr,
-    nameEn: code,
-    zone: getCountryZone(code),
-  };
-});
+// Reference countries for address entry; service availability is verified by CalculateRate
+const FALLBACK_COUNTRIES = Object.entries(ARABIC_COUNTRY_NAMES).map(
+  ([code, nameAr]) => {
+    return {
+      code,
+      nameAr,
+      nameEn: code,
+      zone: getCountryZone(code),
+    };
+  },
+);
 
 class AramexShippingProvider {
   constructor() {
@@ -129,9 +146,9 @@ class AramexShippingProvider {
     const { clientInfo } = this.getConfig();
     return Boolean(
       clientInfo.UserName &&
-        clientInfo.Password &&
-        clientInfo.AccountNumber &&
-        clientInfo.AccountPin
+      clientInfo.Password &&
+      clientInfo.AccountNumber &&
+      clientInfo.AccountPin,
     );
   }
 
@@ -160,7 +177,7 @@ class AramexShippingProvider {
               Accept: "application/json",
             },
             timeout: 6000,
-          }
+          },
         );
 
         if (
@@ -193,373 +210,258 @@ class AramexShippingProvider {
 
     // Comprehensive fallback if API credentials need activation or dev endpoint times out
     const countries = [...FALLBACK_COUNTRIES].sort((a, b) =>
-      a.nameAr.localeCompare(b.nameAr, "ar")
+      a.nameAr.localeCompare(b.nameAr, "ar"),
     );
     this.cachedCountries = countries;
     this.cacheExpiry = now + 6 * 60 * 60 * 1000;
     return countries;
   }
 
-  /**
-   * Parse XML response from Aramex Rate Calculator SOAP endpoint
-   */
-  parseSoapRateResponse(xmlString) {
-    if (!xmlString || typeof xmlString !== "string") return null;
-
-    const hasErrorsMatch = xmlString.match(/<HasErrors>([^<]+)<\/HasErrors>/i);
-    const hasErrors = hasErrorsMatch ? hasErrorsMatch[1].toLowerCase() === "true" : false;
-
-    if (hasErrors) {
-      const messages = [];
-      const notifRegex = /<Notification>([\s\S]*?)<\/Notification>/gi;
-      let match;
-      while ((match = notifRegex.exec(xmlString)) !== null) {
-        const msgMatch = match[1].match(/<Message>([^<]+)<\/Message>/i);
-        const codeMatch = match[1].match(/<Code>([^<]+)<\/Code>/i);
-        if (msgMatch) messages.push(msgMatch[1]);
-        else if (codeMatch) messages.push(codeMatch[1]);
-      }
-      return { hasErrors: true, errors: messages.join("; ") || "Aramex API Error" };
-    }
-
-    const valMatch = xmlString.match(/<TotalAmount[\s\S]*?<Value>([^<]+)<\/Value>/i);
-    const currMatch = xmlString.match(/<TotalAmount[\s\S]*?<CurrencyCode>([^<]+)<\/CurrencyCode>/i);
-
-    if (valMatch && valMatch[1]) {
-      const price = parseFloat(valMatch[1]);
-      if (!isNaN(price) && price > 0) {
-        return {
-          hasErrors: false,
-          price,
-          currency: currMatch && currMatch[1] ? currMatch[1].trim() : "SAR",
-        };
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Invoke Live Aramex SOAP Service
-   */
-  async callLiveAramexApi({
-    clientInfo,
-    originCountry,
-    originCity,
-    origin,
-    destCountry,
-    destCity,
-    destPostalCode,
-    destination,
-    actualWeight,
-    chargeableWeight,
-    hasDimensions,
-    length,
-    width,
-    height,
-    numberOfPieces,
-    productGroup,
-    productType,
-    isDocument,
-    isDomestic,
-    currency,
-  }) {
-    const isLive = process.env.ARAMEX_ENV === "live";
-    const soapUrl = isLive
-      ? "https://ws.aramex.net/ShippingAPI.V2/RateCalculator/Service_1_0.svc"
-      : "https://ws.dev.aramex.net/ShippingAPI.V2/RateCalculator/Service_1_0.svc";
-
-    const soapXml = `<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soap:Body>
-    <RateCalculatorRequest xmlns="http://ws.aramex.net/ShippingAPI/v1/">
-      <ClientInfo>
-        <UserName>${clientInfo.UserName || ""}</UserName>
-        <Password>${clientInfo.Password || ""}</Password>
-        <Version>v1.0</Version>
-        <AccountNumber>${clientInfo.AccountNumber || ""}</AccountNumber>
-        <AccountPin>${clientInfo.AccountPin || ""}</AccountPin>
-        <AccountEntity>${clientInfo.AccountEntity || "RUH"}</AccountEntity>
-        <AccountCountryCode>${clientInfo.AccountCountryCode || "SA"}</AccountCountryCode>
-      </ClientInfo>
-      <Transaction>
-        <Reference1>Dukan_${Date.now()}</Reference1>
-        <Reference2></Reference2>
-        <Reference3></Reference3>
-        <Reference4></Reference4>
-        <Reference5></Reference5>
-      </Transaction>
-      <OriginAddress>
-        <Line1>${origin.addressLine1 || "Dukan Center"}</Line1>
-        <Line2>${origin.addressLine2 || ""}</Line2>
-        <Line3></Line3>
-        <City>${originCity}</City>
-        <StateOrProvinceCode>${origin.stateOrProvinceCode || ""}</StateOrProvinceCode>
-        <PostCode>${origin.postalCode || "11564"}</PostCode>
-        <CountryCode>${originCountry}</CountryCode>
-      </OriginAddress>
-      <DestinationAddress>
-        <Line1>${destination.addressLine1 || "Customer Address"}</Line1>
-        <Line2>${destination.addressLine2 || ""}</Line2>
-        <Line3></Line3>
-        <City>${destCity || originCity}</City>
-        <StateOrProvinceCode>${destination.stateOrProvinceCode || ""}</StateOrProvinceCode>
-        <PostCode>${destPostalCode || ""}</PostCode>
-        <CountryCode>${destCountry}</CountryCode>
-      </DestinationAddress>
-      <ShipmentDetails>
-        <Dimensions ${hasDimensions ? "" : 'xsi:nil="true"'}>
-          ${hasDimensions ? `<Length>${length}</Length><Width>${width}</Width><Height>${height}</Height><Unit>CM</Unit>` : ""}
-        </Dimensions>
-        <ActualWeight>
-          <Unit>KG</Unit>
-          <Value>${actualWeight}</Value>
-        </ActualWeight>
-        <ChargeableWeight xsi:nil="true" />
-        <DescriptionOfGoods>${isDocument ? "Documents" : "Goods / Clothing"}</DescriptionOfGoods>
-        <GoodsOriginCountry>SA</GoodsOriginCountry>
-        <NumberOfPieces>${numberOfPieces}</NumberOfPieces>
-        <ProductGroup>${productGroup}</ProductGroup>
-        <ProductType>${productType}</ProductType>
-        <PaymentType>P</PaymentType>
-        <PaymentOptions></PaymentOptions>
-        <CustomsValueAmount xsi:nil="true" />
-        <CashOnDeliveryAmount xsi:nil="true" />
-        <InsuranceAmount xsi:nil="true" />
-        <CashAdditionalAmount xsi:nil="true" />
-        <CollectAmount xsi:nil="true" />
-        <Services></Services>
-      </ShipmentDetails>
-      <PreferredCurrencyCode>${currency}</PreferredCurrencyCode>
-    </RateCalculatorRequest>
-  </soap:Body>
-</soap:Envelope>`;
-
-    const response = await axios.post(soapUrl, soapXml, {
-      headers: {
-        "Content-Type": "text/xml; charset=utf-8",
-        SOAPAction: "http://ws.aramex.net/ShippingAPI/v1/Service_1_0/CalculateRate",
-      },
-      timeout: 10000,
-    });
-
-    const parsed = this.parseSoapRateResponse(response.data);
-    if (parsed && !parsed.hasErrors && parsed.price > 0) {
-      return {
-        success: true,
-        carrier: this.name,
-        carrierName: this.displayName,
-        service: productType,
-        serviceName: isDomestic ? "Aramex Domestic Express" : "Aramex Priority Parcel Express",
-        productGroup,
-        productType,
-        shipmentType: isDocument ? "document" : "parcel",
-        price: parsed.price,
-        currency: parsed.currency || currency,
-        rateDetails: null,
-        estimatedDays: "15 يوم",
-        isLiveQuote: true,
-        isEstimated: false,
-        origin: { countryCode: originCountry, city: originCity },
-        destination: { countryCode: destCountry, city: destCity },
-        weight: actualWeight,
-        chargeableWeight: Math.round(chargeableWeight * 100) / 100,
-      };
-    }
-
-    if (parsed?.errors) {
-      console.warn("Aramex SOAP response notice:", parsed.errors);
-    }
-    return null;
-  }
-
-  /**
-   * Calculate Shipping Rate using Aramex CalculateRate API / Published Tariffs
-   * @param {Object} params
-   * @param {Object} params.origin - { countryCode: 'SA', city: 'Riyadh', postalCode: '' }
-   * @param {Object} params.destination - { countryCode: 'AE', city: 'Dubai', postalCode: '' }
-   * @param {Object} params.packageDetails - { weight: 1.0, length: 0, width: 0, height: 0, numberOfPieces: 1 }
-   * @param {string} params.currency - 'SAR'
-   */
-  async calculateRate({ origin = {}, destination = {}, packageDetails = {}, currency = "SAR" }) {
-    const originCountry = (origin.countryCode || "SA").toUpperCase();
-    const originCity = origin.city || "Riyadh";
-
-    const destCountry = (destination.countryCode || "").toUpperCase();
-    const destCity = destination.city || "";
-
-    if (!destCountry) {
-      throw new Error("Destination country code is required for shipping calculation");
-    }
-
-    const isDomestic = originCountry === destCountry;
-    const actualWeight = Math.max(0.1, Number(packageDetails.weight) || 1.0);
-    const numberOfPieces = Math.max(1, Number(packageDetails.numberOfPieces) || 1);
-    const length = Number(packageDetails.length) || 0;
-    const width = Number(packageDetails.width) || 0;
-    const height = Number(packageDetails.height) || 0;
-
-    // Aramex volumetric weight calculation: only apply when explicit dimensions are provided
-    const hasDimensions = length > 0 && width > 0 && height > 0;
-    const volumetricWeight = hasDimensions ? (length * width * height) / 5000 : 0;
-    const chargeableWeight = Math.max(actualWeight, volumetricWeight);
-
-    const isDocument = packageDetails.shipmentType === "document" || packageDetails.isDocument;
-
-    // Product Group: DOM for domestic Saudi, EXP for international export
-    const productGroup = isDomestic ? "DOM" : "EXP";
-
-    // Product Type:
-    // Domestic: OND (Overnight Domestic)
-    // International Document: DOX (Document Express) / PDX (Priority Document Express)
-    // International Parcel: PPX (Priority Parcel Express) / EPX (Economy)
-    let productType = packageDetails.productType;
-    if (!productType) {
-      if (isDomestic) {
-        productType = "OND";
-      } else if (isDocument) {
-        productType = "DOX";
-      } else {
-        productType = packageDetails.preferEconomy ? "EPX" : "PPX";
-      }
-    }
-
-    // Default postal codes for countries that strictly require ZipCode in Aramex API
-    let destPostalCode = destination.postalCode || "";
-    if (!destPostalCode) {
-      if (destCountry === "GB") destPostalCode = "M1 1AE";
-      else if (destCountry === "US") destPostalCode = "10001";
-      else if (destCountry === "CA") destPostalCode = "K1A 0B1";
-      else if (destCountry === "DE") destPostalCode = "10115";
-      else if (destCountry === "FR") destPostalCode = "75001";
-    }
-
-    // If Aramex credentials (including AccountNumber & Pin) are configured in .env, call live SOAP API
-    if (this.isConfigured()) {
-      try {
-        const { clientInfo } = this.getConfig();
-        const liveQuote = await this.callLiveAramexApi({
-          clientInfo,
-          originCountry,
-          originCity,
-          origin,
-          destCountry,
-          destCity,
-          destPostalCode,
-          destination,
-          actualWeight,
-          chargeableWeight,
-          hasDimensions,
-          length,
-          width,
-          height,
-          numberOfPieces,
-          productGroup,
-          productType,
-          isDocument,
-          isDomestic,
-          currency,
-        });
-
-        if (liveQuote) {
-          return liveQuote;
-        }
-      } catch (apiError) {
-        console.warn("Aramex live API call failed, falling back to dynamic tariff calculation:", apiError.message);
-      }
-    }
-
-    // Accurate official Aramex published tariff rate based on actual package weight
-    return this.calculateFallbackRate({
-      originCountry,
-      originCity,
-      destCountry,
-      destCity,
-      isDomestic,
-      weight: actualWeight,
-      chargeableWeight,
-      isDocument,
-      productGroup,
-      productType,
-      currency,
-    });
-  }
-
-  /**
-   * Deterministic zone-based rate calculation aligned with official Aramex published tariffs
-   * Calculates dynamic price based on actual weight without artificial fixed box penalties
-   */
-  calculateFallbackRate({
-    originCountry,
-    originCity,
-    destCountry,
-    destCity,
-    isDomestic,
-    weight,
-    chargeableWeight = 1.0,
-    isDocument = false,
-    productGroup,
-    productType,
+  /** Get a real quote from Aramex. Carrier errors must never become made-up prices. */
+  async calculateRate({
+    origin = {},
+    destination = {},
+    packageDetails = {},
     currency = "SAR",
   }) {
-    const calcWeight = Math.max(0.1, chargeableWeight || weight || 1.0);
-    const additionalWeight = Math.max(0, calcWeight - 1.0);
-
-    // GCC Countries (Kuwait, UAE, Bahrain, Qatar, Oman)
-    const gccCountries = ["AE", "KW", "BH", "QA", "OM"];
-    // Arab Regional (Egypt, Jordan, Sudan, etc.)
-    const regionalCountries = ["EG", "JO", "SD", "IQ", "LB", "YE", "MA", "TN", "DZ", "LY", "SY", "PS"];
-
-    let baseRate = 28.00;
-    let perKgRate = 4.00;
-    let serviceName = "Aramex Domestic Express";
-
-    if (isDomestic) {
-      // Saudi Domestic Express: 28 SAR for 1st kg, + 4 SAR per additional kg
-      baseRate = 28.00;
-      perKgRate = 4.00;
-      serviceName = "Aramex Domestic Express";
-    } else if (gccCountries.includes(destCountry)) {
-      // GCC Parcel Express: 45 SAR for 1st kg, + 15 SAR per additional kg
-      baseRate = isDocument ? 40.00 : 45.00;
-      perKgRate = 15.00;
-      serviceName = isDocument ? "Aramex GCC Document Express" : "Aramex GCC Express";
-    } else if (regionalCountries.includes(destCountry)) {
-      // Arab Regional Parcel Express: 65 SAR for 1st kg, + 18 SAR per additional kg
-      baseRate = isDocument ? 55.00 : 65.00;
-      perKgRate = 18.00;
-      serviceName = isDocument ? "Aramex Regional Document Express" : "Aramex Regional Parcel Express";
-    } else {
-      // International Priority Parcel (USA, UK, Europe, Worldwide)
-      // Realistic official tariff: 95 SAR for 1st kg, + 30 SAR per additional kg
-      baseRate = isDocument ? 80.00 : 95.00;
-      perKgRate = 30.00;
-      serviceName = isDocument ? "Document Express" : "Aramex Priority Parcel Express";
+    const invalid = (message) => {
+      throw Object.assign(new Error(message), { status: 400 });
+    };
+    for (const value of [origin, destination, packageDetails]) {
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        invalid("بيانات العنوان أو الطرد غير صالحة");
     }
-
-    const totalPrice = Math.round((baseRate + additionalWeight * perKgRate) * 100) / 100;
-
+    const text = (value, field, required = false) => {
+      if (value === undefined) value = "";
+      if (typeof value !== "string") invalid(field + " غير صالح");
+      const result = value.trim();
+      if (required && !result) invalid(field + " مطلوب");
+      return result;
+    };
+    const countryCode = (value) => {
+      const code = text(value, "رمز الدولة", true).toUpperCase();
+      if (!/^[A-Z]{2}$/.test(code))
+        invalid("يرجى إدخال رمز الدولة المكون من حرفين");
+      return code;
+    };
+    const address = (value) => ({
+      Line1: text(value.addressLine1, "الشارع"),
+      Line2: text(value.addressLine2, "العنوان"),
+      Line3: "",
+      City: text(value.city, "المدينة", true),
+      StateOrProvinceCode: text(value.stateOrProvinceCode, "الولاية"),
+      PostCode: text(value.postalCode, "الرمز البريدي"),
+      CountryCode: countryCode(value.countryCode),
+    });
+    const originAddress = address(origin);
+    const destinationAddress = address(destination);
+    const preferredCurrency = text(currency, "العملة", true).toUpperCase();
+    if (!/^[A-Z]{3}$/.test(preferredCurrency)) invalid("رمز العملة غير صالح");
+    const positiveNumber = (value, field) => {
+      if (
+        !["string", "number"].includes(typeof value) ||
+        !Number.isFinite(Number(value)) ||
+        Number(value) <= 0
+      )
+        invalid(field + " يجب أن يكون رقماً موجباً");
+      return Number(value);
+    };
+    const weightUnit = text(
+      packageDetails.weightUnit ?? "KG",
+      "وحدة الوزن",
+    ).toUpperCase();
+    if (!["KG", "LB"].includes(weightUnit))
+      invalid("وحدة الوزن يجب أن تكون KG أو LB");
+    const weight =
+      positiveNumber(
+        packageDetails.weight === undefined ? 1 : packageDetails.weight,
+        "الوزن",
+      ) * (weightUnit === "LB" ? 0.45359237 : 1);
+    const numberOfPieces = positiveNumber(
+      packageDetails.numberOfPieces === undefined
+        ? 1
+        : packageDetails.numberOfPieces,
+      "عدد القطع",
+    );
+    if (!Number.isSafeInteger(numberOfPieces) || numberOfPieces > 2147483647)
+      invalid("عدد القطع يجب أن يكون عدداً صحيحاً موجباً");
+    const dimensionValues = [
+      packageDetails.length,
+      packageDetails.width,
+      packageDetails.height,
+    ];
+    let dimensions = null;
+    // Existing calculators send zeroes to mean no dimensions were supplied.
+    if (!dimensionValues.every((value) => value === undefined || value === 0 || value === "0")) {
+      const unit = text(
+        packageDetails.dimensionUnit ?? "CM",
+        "وحدة الأبعاد",
+      ).toUpperCase();
+      if (!["CM", "IN"].includes(unit))
+        invalid("وحدة الأبعاد يجب أن تكون CM أو IN");
+      const [Length, Width, Height] = dimensionValues.map((value) =>
+        positiveNumber(value, "أبعاد الطرد"),
+      );
+      dimensions = { Length, Width, Height, Unit: unit };
+    }
+    const isDomestic =
+      originAddress.CountryCode === destinationAddress.CountryCode;
+    if (
+      packageDetails.shipmentType !== undefined &&
+      !["parcel", "document"].includes(packageDetails.shipmentType)
+    )
+      invalid("نوع الشحنة غير صالح");
+    if (
+      packageDetails.isDocument !== undefined &&
+      typeof packageDetails.isDocument !== "boolean"
+    )
+      invalid("نوع الشحنة غير صالح");
+    const isDocument =
+      packageDetails.shipmentType === "document" ||
+      packageDetails.isDocument === true;
+    const productGroup = isDomestic ? "DOM" : "EXP";
+    const productType = text(
+      packageDetails.productType ??
+        (isDomestic
+          ? "OND"
+          : isDocument
+            ? "PDX"
+            : packageDetails.preferEconomy
+              ? "EPX"
+              : "PPX"),
+      "نوع الخدمة",
+      true,
+    ).toUpperCase();
+    if (!/^[A-Z]{3}$/.test(productType)) invalid("نوع الخدمة غير صالح");
+    if (!["dev", "live"].includes(process.env.ARAMEX_ENV || "dev")) {
+      throw Object.assign(new Error("إعداد بيئة أرامكس غير صالح"), {
+        status: 503,
+        code: "ARAMEX_NOT_CONFIGURED",
+      });
+    }
+    if (!this.isConfigured()) {
+      throw Object.assign(
+        new Error("خدمة الشحن غير متاحة حالياً، يرجى المحاولة لاحقاً"),
+        { status: 503, code: "ARAMEX_NOT_CONFIGURED" },
+      );
+    }
+    const { baseUrl, clientInfo } = this.getConfig();
+    let data;
+    try {
+      const response = await axios.post(
+        baseUrl + "/CalculateRate",
+        {
+          ClientInfo: clientInfo,
+          Transaction: { Reference1: "Dukan shipping rate" },
+          OriginAddress: originAddress,
+          DestinationAddress: destinationAddress,
+          ShipmentDetails: {
+            Dimensions: dimensions,
+            ActualWeight: { Unit: "KG", Value: weight },
+            ChargeableWeight: null,
+            DescriptionOfGoods: isDocument ? "Documents" : "Goods / Clothing",
+            GoodsOriginCountry: null,
+            NumberOfPieces: numberOfPieces,
+            ProductGroup: productGroup,
+            ProductType: productType,
+            PaymentType: "P",
+            PaymentOptions: "",
+            CustomsValueAmount: null,
+            CashOnDeliveryAmount: null,
+            InsuranceAmount: null,
+            CashAdditionalAmount: null,
+            CollectAmount: null,
+            Services: "",
+          },
+          PreferredCurrencyCode: preferredCurrency,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          timeout: 10000,
+        },
+      );
+      data = response.data;
+    } catch (error) {
+      // Axios errors contain the request body and credentials. Never expose or log them.
+      const isTimeout = ["ECONNABORTED", "ETIMEDOUT"].includes(error.code);
+      throw Object.assign(
+        new Error(
+          isTimeout
+            ? "انتهت مهلة طلب الشحن، يرجى المحاولة مجدداً"
+            : "تعذر الاتصال بأرامكس، يرجى المحاولة لاحقاً",
+        ),
+        {
+          status: isTimeout ? 504 : 502,
+          code: "ARAMEX_UNAVAILABLE",
+        },
+      );
+    }
+    if (data?.HasErrors === true) {
+      throw Object.assign(
+        new Error(
+          "تعذر احتساب الشحن عبر أرامكس، يرجى التحقق من الدولة والمدينة والرمز البريدي والولاية أو التواصل مع المتجر",
+        ),
+        {
+          status: 422,
+          code: "ARAMEX_RATE_REJECTED",
+        },
+      );
+    }
+    const amount = data?.TotalAmount;
+    const price = ["number", "string"].includes(typeof amount?.Value)
+      ? Number(amount.Value)
+      : NaN;
+    if (
+      data?.HasErrors !== false ||
+      !Number.isFinite(price) ||
+      price <= 0 ||
+      typeof amount?.CurrencyCode !== "string" ||
+      amount.CurrencyCode.toUpperCase() !== preferredCurrency
+    ) {
+      throw Object.assign(
+        new Error("تعذر الحصول على سعر شحن صالح بالعملة المطلوبة"),
+        { status: 502, code: "ARAMEX_INVALID_RESPONSE" },
+      );
+    }
+    const serviceNames = {
+      OND: "Aramex Domestic Express",
+      PPX: "Aramex Priority Parcel Express",
+      EPX: "Aramex Economy Parcel Express",
+      PDX: "Aramex Priority Document Express",
+      DOX: "Aramex Document Express",
+    };
     return {
       success: true,
       carrier: this.name,
       carrierName: this.displayName,
       service: productType,
-      serviceName,
+      serviceName: serviceNames[productType] || "Aramex " + productType,
       productGroup,
       productType,
       shipmentType: isDocument ? "document" : "parcel",
-      price: totalPrice,
-      currency,
-      estimatedDays: "15 يوم",
-      isLiveQuote: false,
-      isEstimated: true,
-      origin: { countryCode: originCountry, city: originCity },
-      destination: { countryCode: destCountry, city: destCity },
+      price,
+      currency: preferredCurrency,
+      rateDetails: data.RateDetails || null,
+      estimatedDays: null,
+      isLiveQuote: true,
+      isEstimated: false,
+      isSandbox: process.env.ARAMEX_ENV !== "live",
+      origin: {
+        countryCode: originAddress.CountryCode,
+        city: originAddress.City,
+      },
+      destination: {
+        countryCode: destinationAddress.CountryCode,
+        city: destinationAddress.City,
+      },
       weight,
-      chargeableWeight: Math.round(calcWeight * 100) / 100,
+      weightUnit: "KG",
+      numberOfPieces,
     };
   }
 }
 
 export default new AramexShippingProvider();
-

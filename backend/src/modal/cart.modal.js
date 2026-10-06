@@ -44,6 +44,11 @@ const aramexShippingSchema = new Schema(
     country: { type: String, default: "المملكة العربية السعودية" },
     city: { type: String, default: "" },
     postalCode: { type: String, default: "" },
+    stateOrProvinceCode: { type: String, default: "" },
+    productGroup: { type: String },
+    productType: { type: String },
+    isLiveQuote: { type: Boolean, default: false },
+    isSandbox: { type: Boolean, default: false },
     serviceName: { type: String, default: "Aramex Express" },
     estimatedDays: { type: String, default: "" },
     isCalculated: { type: Boolean, default: false },
@@ -71,7 +76,7 @@ const cartSchema = new Schema(
         price: 0,
         currency: "SAR",
         kilo: 1,
-        boxSize: 45,
+        boxSize: 0,
         countryCode: "SA",
         country: "المملكة العربية السعودية",
         city: "",
@@ -85,6 +90,13 @@ const cartSchema = new Schema(
   },
   { timestamps: true }
 );
+
+// A quote belongs to the exact cart contents and delivery address it was requested for.
+cartSchema.pre("save", function () {
+  if (!this.isNew && (this.isModified("items") || this.isModified("addressId"))) {
+    this.aramex = undefined;
+  }
+});
 
 const Cart = model("Cart", cartSchema);
 

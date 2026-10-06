@@ -167,7 +167,7 @@ export default function CountryPickerModal({
                   اختر دولة الوجهة
                 </DukanText>
                 <DukanText className="text-[11px] text-textSecondary">
-                  قائمة الدول المعتمدة للشحن عبر أرامكس
+                  اختر الدولة للتحقق من توفر الشحن وسعره
                 </DukanText>
               </View>
             </View>

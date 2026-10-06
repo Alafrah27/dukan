@@ -12,7 +12,7 @@ export const calculateShippingRate = async (req, res) => {
       packageDetails,
       currency = "SAR",
       provider,
-    } = req.body;
+    } = req.body || {};
 
     if (!destination || !destination.countryCode) {
       return res.status(400).json({
@@ -36,11 +36,11 @@ export const calculateShippingRate = async (req, res) => {
       quotes,
     });
   } catch (error) {
-    console.error("Shipping Rate Calculation Controller Error:", error);
-    return res.status(500).json({
+    console.error("Shipping Rate Calculation Controller Error:", error.code || error.status || "internal");
+    return res.status(error.status || 500).json({
       success: false,
       error: "Shipping Calculation Failed",
-      message: error.message || "حدث خطأ أثناء حساب تكلفة الشحن",
+      message: error.status ? error.message : "حدث خطأ أثناء حساب تكلفة الشحن",
     });
   }
 };

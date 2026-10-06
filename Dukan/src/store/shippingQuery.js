@@ -1,7 +1,17 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import api from "../lib/axios";
 
 export const SHIPPING_COUNTRIES_QUERY_KEY = ["shipping-countries"];
+
+/** Get Shipping Rates using the unified backend API. Credentials stay on the server. */
+export const useCalculateShippingRate = () => {
+  return useMutation({
+    mutationFn: async (payload) => {
+      const response = await api.post("/shipping/calculate-rate", payload);
+      return response.data;
+    },
+  });
+};
 
 /**
  * Fallback shipping countries list aligned with Admin Aramex defaults
