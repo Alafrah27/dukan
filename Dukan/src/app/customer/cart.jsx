@@ -353,7 +353,7 @@ export default function CustomerCart() {
   const itemsSubtotal = summary?.itemsSubtotal || 0;
   const tailoringTotal = summary?.tailoringTotal || 0;
   const shippingFee = cart?.aramex?.price || 0;
-  const isShippingCalculated = Boolean(cart?.aramex?.isCalculated && shippingFee > 0);
+  const isShippingCalculated = Boolean(cart?.aramex?.isCalculated);
   const finalTotal = summary?.finalTotal || itemsSubtotal + tailoringTotal + (isShippingCalculated ? shippingFee : 0);
   const currency = summary?.currency || "ر.س";
 
@@ -941,66 +941,74 @@ export default function CustomerCart() {
               </View>
             </View>
 
-            {/* 5. CHECKOUT ACTION BUTTON */}
-            <TouchableOpacity
-              onPress={() => {
-                if (!linkedAddress) {
+            {/* 5. CHECKOUT ACTION BUTTON (Only shown after shipping is calculated) */}
+            {isShippingCalculated ? (
+              <TouchableOpacity
+                onPress={() => {
+                  if (!linkedAddress) {
+                    Toast.show({
+                      type: "info",
+                      text1: "تنبيه",
+                      text2: "يرجى تحديد عنوان التوصيل لإتمام الطلب",
+                      position: "bottom",
+                    });
+                    router.push("/address");
+                    return;
+                  }
                   Toast.show({
-                    type: "info",
-                    text1: "تنبيه",
-                    text2: "يرجى تحديد عنوان التوصيل لإتمام الطلب",
+                    type: "success",
+                    text1: "متابعة الشراء",
+                    text2: `المجموع النهائي: ${finalTotal.toFixed(2)} ${currency}`,
                     position: "bottom",
                   });
-                  router.push("/address");
-                  return;
-                }
-                if (!isShippingCalculated) {
-                  Alert.alert(
-                    "حساب الشحن",
-                    "هل ترغب باحتساب تكلفة الشحن عبر أرامكس قبل المتابعة؟",
-                    [
-                      {
-                        text: "احسب الآن",
-                        onPress: handleCalculateShipping,
-                      },
-                      {
-                        text: "متابعة",
-                        onPress: () => {
-                          Toast.show({
-                            type: "success",
-                            text1: "متابعة الطلب",
-                            text2: "جارٍ توجيهك لصفحة الدفع...",
-                            position: "bottom",
-                          });
-                        },
-                      },
-                    ]
-                  );
-                  return;
-                }
-                Toast.show({
-                  type: "success",
-                  text1: "متابعة الشراء",
-                  text2: `المجموع النهائي: ${finalTotal.toFixed(2)} ${currency}`,
-                  position: "bottom",
-                });
-              }}
-              className="bg-primary rounded-2xl py-4 px-5 flex-row items-center justify-between shadow-lg active:scale-[0.99] mb-4"
-            >
-              <View>
-                <DukanText className="text-xs text-white/80">المجموع للدفع</DukanText>
-                <DukanText bold className="text-lg text-white">
-                  {finalTotal.toFixed(2)} {currency}
-                </DukanText>
-              </View>
+                }}
+                className="bg-primary rounded-2xl py-4 px-5 flex-row items-center justify-between shadow-lg active:scale-[0.99] mb-4"
+              >
+                <View>
+                  <DukanText className="text-xs text-white/80">المجموع للدفع</DukanText>
+                  <DukanText bold className="text-lg text-white">
+                    {finalTotal.toFixed(2)} {currency}
+                  </DukanText>
+                </View>
 
-              <View className="flex-row items-center gap-1.5 bg-white/20 px-4 py-2 rounded-xl">
-                <DukanText bold className="text-white text-sm">
-                  إتمام الطلب
-                </DukanText>
-                <ChevronLeft size={18} color={Colors.white} />
+                <View className="flex-row items-center gap-1.5 bg-white/20 px-4 py-2 rounded-xl">
+                  <DukanText bold className="text-white text-sm">
+                    إتمام الطلب
+                  </DukanText>
+                  <ChevronLeft size={18} color={Colors.white} />
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <View className="bg-amber-50 rounded-2xl p-4 border border-amber-200/80 mb-4 flex-row items-center justify-between shadow-sm">
+                <View className="flex-row items-center gap-2.5 flex-1 pl-2">
+                  <View className="w-9 h-9 rounded-xl bg-amber-100 items-center justify-center">
+                    <Truck size={18} color="#D97706" />
+                  </View>
+                  <View className="flex-1">
+                    <DukanText bold className="text-xs text-amber-900">
+                      احتساب الشحن مطلوب للمتابعة
+                    </DukanText>
+                    <DukanText className="text-[11px] text-amber-700 leading-4">
+                      يرجى احتساب تكلفة الشحن أعلاه لإظهار زر إتمام الطلب
+                    </DukanText>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={handleCalculateShipping}
+                  disabled={calculateShippingMutation.isPending}
+                  className="bg-[#E61E28] px-3.5 py-2.5 rounded-xl flex-row items-center gap-1.5 shadow-xs active:opacity-90"
+                >
+                  {calculateShippingMutation.isPending ? (
+                    <ActivityIndicator size="small" color={Colors.white} />
+                  ) : (
+                    <RefreshCw size={13} color={Colors.white} />
+                  )}
+                  <DukanText bold className="text-xs text-white">
+                    احسب الآن
+                  </DukanText>
+                </TouchableOpacity>
               </View>
-            </TouchableOpacity>
+            )}
           </>
         )}
       </ScrollView>
