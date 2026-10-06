@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   View,
   ScrollView,
@@ -88,13 +88,8 @@ export default function CustomerCart() {
   const addresses = addressesData?.addresses || [];
   const linkedAddress = cart?.addressId;
 
-  // Aramex Calculator Form State
-  // The box size is FIXED from admin: 45 cm
-  const FIXED_BOX_SIZE = 45;
-  const [kilo, setKilo] = useState("1");
-  const [selectedCountryCode, setSelectedCountryCode] = useState("SA");
-  const [city, setCity] = useState("");
-  const [postalCode, setPostalCode] = useState("");
+  // Aramex Calculator Form State (based on actual weight)
+  const [shippingForm, setShippingForm] = useState({});
   const [isAddressesModalOpen, setIsAddressesModalOpen] = useState(false);
   const [isCountryModalOpen, setIsCountryModalOpen] = useState(false);
 
@@ -116,14 +111,38 @@ export default function CustomerCart() {
     );
   }, [addresses, linkedAddress]);
 
+  // Derive defaults from server data; preserve edits only for the current address.
+  const destination = linkedAddress?.destination || defaultAddress?.destination || {};
+  const addressCountry = (destination.country || "").trim();
+  const addressCountryCode = countries.find((country) =>
+    country.code.toLowerCase() === addressCountry.toLowerCase() ||
+    country.nameAr === addressCountry ||
+    country.nameEn?.toLowerCase() === addressCountry.toLowerCase()
+  )?.code || (/^[a-z]{2}$/i.test(addressCountry) ? addressCountry.toUpperCase() : "");
+  const formKey = JSON.stringify([cart?._id, linkedAddress?._id, destination]);
+  const draft = shippingForm.key === formKey ? shippingForm : {};
+  const savedQuote = cart?.aramex?.isCalculated && cart.aramex.isLiveQuote ? cart.aramex : null;
+  const kilo = draft.kilo ?? String(savedQuote?.kilo || 1);
+  const selectedCountryCode = draft.countryCode ?? savedQuote?.countryCode ?? addressCountryCode;
+  const city = draft.city ?? savedQuote?.city ?? destination.city ?? "";
+  const postalCode = draft.postalCode ?? savedQuote?.postalCode ?? destination.postalcode ?? "";
+  const stateOrProvinceCode = draft.stateOrProvinceCode ?? savedQuote?.stateOrProvinceCode ?? destination.state ?? "";
+  const setShippingField = (field, value) => setShippingForm((previous) => ({
+    ...(previous.key === formKey ? previous : {}), key: formKey, [field]: value,
+  }));
+  const setKilo = (value) => setShippingField("kilo", value);
+  const setCity = (value) => setShippingField("city", value);
+  const setPostalCode = (value) => setShippingField("postalCode", value);
+  const setStateOrProvinceCode = (value) => setShippingField("stateOrProvinceCode", value);
+
   // Find currently selected country metadata
   const selectedCountryObj = useMemo(() => {
     return (
       countries.find(
         (c) => (c.code || "").toUpperCase() === (selectedCountryCode || "").toUpperCase()
       ) || {
-        code: selectedCountryCode || "SA",
-        nameAr: selectedCountryCode === "SA" ? "المملكة العربية السعودية" : selectedCountryCode,
+        code: selectedCountryCode,
+        nameAr: selectedCountryCode || "اختر دولة الوجهة",
         nameEn: selectedCountryCode,
       }
     );
@@ -138,44 +157,14 @@ export default function CustomerCart() {
     return selCode === def || selNameAr === def || (selNameAr && def.includes(selNameAr));
   }, [defaultAddress, selectedCountryCode, selectedCountryObj]);
 
-  // Sync initial calculator values from linked delivery address or cart.aramex
-  useEffect(() => {
-    if (cart?.aramex?.isCalculated) {
-      if (cart.aramex.kilo) setKilo(String(cart.aramex.kilo));
-      if (cart.aramex.countryCode) setSelectedCountryCode(cart.aramex.countryCode);
-      if (cart.aramex.city) setCity(cart.aramex.city);
-      if (cart.aramex.postalCode) setPostalCode(cart.aramex.postalCode);
-      return;
-    }
-
-    if (linkedAddress?.destination) {
-      const dest = linkedAddress.destination;
-      if (dest.city && !city) setCity(dest.city);
-      if (dest.postalcode && !postalCode) setPostalCode(dest.postalcode);
-      if (dest.country) {
-        const found = countries.find(
-          (c) =>
-            c.code.toLowerCase() === dest.country.toLowerCase() ||
-            c.nameAr?.includes(dest.country) ||
-            dest.country.includes(c.nameAr || "")
-        );
-        if (found) setSelectedCountryCode(found.code);
-      }
-    } else if (defaultAddress?.destination) {
-      const dest = defaultAddress.destination;
-      if (dest.city && !city) setCity(dest.city);
-      if (dest.postalcode && !postalCode) setPostalCode(dest.postalcode);
-      if (dest.country) {
-        const found = countries.find(
-          (c) =>
-            c.code.toLowerCase() === dest.country.toLowerCase() ||
-            c.nameAr?.includes(dest.country) ||
-            dest.country.includes(c.nameAr || "")
-        );
-        if (found) setSelectedCountryCode(found.code);
-      }
-    }
-  }, [linkedAddress, defaultAddress, cart?.aramex, countries]);
+  const handleSelectCountry = (code) => {
+    if (calculateShippingMutation.isPending) return;
+    if (code === selectedCountryCode) return;
+    setShippingForm({
+      key: formKey, kilo, countryCode: code,
+      city: "", postalCode: "", stateOrProvinceCode: "",
+    });
+  };
 
   // Handle Quantity Change
   const handleUpdateQuantity = (item, delta) => {
@@ -267,12 +256,12 @@ export default function CustomerCart() {
 
   // Handle Aramex Shipping Calculation
   const handleCalculateShipping = () => {
-    const parsedWeight = parseFloat(kilo);
-    if (isNaN(parsedWeight) || parsedWeight <= 0) {
+    const parsedWeight = Number(kilo);
+    if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) {
       Toast.show({
         type: "error",
         text1: "الوزن غير صحيح",
-        text2: "يرجى تحديد وزن الشحنة بالكيلو (0.1 كجم على الأقل)",
+        text2: "يرجى إدخال وزن موجب بالكيلوغرام",
         position: "bottom",
       });
       return;
@@ -288,19 +277,33 @@ export default function CustomerCart() {
       return;
     }
 
+    if (
+      !selectedCountryCode ||
+      (selectedCountryObj.postCodeRequired && !postalCode.trim()) ||
+      (selectedCountryObj.stateRequired && !stateOrProvinceCode.trim())
+    ) {
+      Toast.show({
+        type: "error", text1: "بيانات الوجهة غير مكتملة",
+        text2: "يرجى تحديد الدولة وإدخال الرمز البريدي والولاية عند طلبهما",
+        position: "bottom",
+      });
+      return;
+    }
+
     calculateShippingMutation.mutate(
       {
         kilo: parsedWeight,
         countryCode: selectedCountryCode,
         city: city.trim(),
         postalCode: postalCode.trim(),
+        stateOrProvinceCode: stateOrProvinceCode.trim(),
       },
       {
         onSuccess: (data) => {
           Toast.show({
             type: "success",
             text1: "تم احتساب الشحن عبر أرامكس بنجاح",
-            text2: `${data?.aramex?.price || 0} ${data?.aramex?.currency || "SAR"} (${data?.aramex?.estimatedDays || "1-3 أيام"})`,
+            text2: `${data?.aramex?.price || 0} ${data?.aramex?.currency || "SAR"}`,
             position: "bottom",
           });
         },
@@ -318,6 +321,7 @@ export default function CustomerCart() {
 
   // Quick weight stepper
   const handleWeightStep = (delta) => {
+    if (calculateShippingMutation.isPending) return;
     const current = parseFloat(kilo) || 1;
     const next = Math.max(0.5, current + delta);
     setKilo(next.toFixed(1).replace(/\.0$/, ""));
@@ -352,9 +356,17 @@ export default function CustomerCart() {
   // Calculated Costs
   const itemsSubtotal = summary?.itemsSubtotal || 0;
   const tailoringTotal = summary?.tailoringTotal || 0;
-  const shippingFee = cart?.aramex?.price || 0;
-  const isShippingCalculated = Boolean(cart?.aramex?.isCalculated && shippingFee > 0);
-  const finalTotal = summary?.finalTotal || itemsSubtotal + tailoringTotal + (isShippingCalculated ? shippingFee : 0);
+  const isShippingCalculated = Boolean(
+    cart?.aramex?.isCalculated && cart.aramex.isLiveQuote && !isCartFetching &&
+    !updateCartItemMutation.isPending && !updateCartAddressMutation.isPending &&
+    !removeCartItemMutation.isPending && !clearCartMutation.isPending &&
+    !calculateShippingMutation.isPending && !calculateShippingMutation.isError &&
+    Number(kilo) === cart.aramex.kilo && selectedCountryCode === cart.aramex.countryCode &&
+    city.trim() === cart.aramex.city && postalCode.trim() === (cart.aramex.postalCode || "") &&
+    stateOrProvinceCode.trim() === (cart.aramex.stateOrProvinceCode || "")
+  );
+  const shippingFee = isShippingCalculated ? cart.aramex.price : 0;
+  const finalTotal = itemsSubtotal + tailoringTotal + shippingFee;
   const currency = summary?.currency || "ر.س";
 
   return (
@@ -362,7 +374,7 @@ export default function CustomerCart() {
       {/* Top Header */}
       <View className="flex-row items-center justify-between px-5 py-3  ">
         <View className="flex-row items-center gap-2">
-         
+
         </View>
 
         {items.length > 0 && (
@@ -481,15 +493,13 @@ export default function CustomerCart() {
                             {/* Tailoring Size Type Badge (child / adult) */}
                             {isTailored && item.tailoringSizeType && (
                               <View
-                                className={`px-2 py-0.5 rounded-md ${
-                                  isChildSize ? "bg-amber-100" : "bg-blue-100"
-                                }`}
+                                className={`px-2 py-0.5 rounded-md ${isChildSize ? "bg-amber-100" : "bg-blue-100"
+                                  }`}
                               >
                                 <DukanText
                                   bold
-                                  className={`text-[11px] ${
-                                    isChildSize ? "text-amber-800" : "text-blue-800"
-                                  }`}
+                                  className={`text-[11px] ${isChildSize ? "text-amber-800" : "text-blue-800"
+                                    }`}
                                 >
                                   تفصيل: {isChildSize ? "طفل (Child)" : "بالغ (Adult)"}
                                 </DukanText>
@@ -588,7 +598,7 @@ export default function CustomerCart() {
                       linkedAddress.destination?.city,
                       linkedAddress.destination?.country,
                       linkedAddress.destination?.postalcode &&
-                        `الرمز البريدي: ${linkedAddress.destination?.postalcode}`,
+                      `الرمز البريدي: ${linkedAddress.destination?.postalcode}`,
                     ]
                       .filter(Boolean)
                       .join("، ")}
@@ -619,25 +629,25 @@ export default function CustomerCart() {
                       حاسبة شحن أرامكس (Aramex)
                     </DukanText>
                     <DukanText className="text-[11px] text-textSecondary">
-                      احسب تكلفة ومدة الشحن المباشرة لسلتك
+                      احصل على سعر الشحن من أرامكس لسلتك
                     </DukanText>
                   </View>
                 </View>
 
-                {/* Fixed Box Badge */}
+                {/* Package Type Badge */}
                 <View className="flex-row items-center gap-1 bg-surface px-2.5 py-1 rounded-full border border-primary/20">
                   <Package size={12} color={Colors.primary} />
                   <DukanText bold className="text-[11px] text-primary">
-                    الصندوق: {FIXED_BOX_SIZE} سم (ثابت)
+                    طرد أرامكس القياسي
                   </DukanText>
                 </View>
               </View>
 
-              {/* Fixed Dimension Note */}
-              <View className="bg-amber-50 rounded-xl p-2.5 mb-3.5 flex-row items-center gap-2 border border-amber-200/50">
-                <ShieldCheck size={16} color="#B45309" />
-                <DukanText className="text-[11px] text-amber-800 flex-1 leading-4">
-                  حجم صندوق الشحن معتمد وثابت من الإدارة ({FIXED_BOX_SIZE}×{FIXED_BOX_SIZE}×{FIXED_BOX_SIZE} سم). يمكنك تغيير الوزن والدولة والمدينة والرمز البريدي فقط.
+              {/* Dynamic Weight Note */}
+              <View className="bg-primary/5 rounded-xl p-2.5 mb-3.5 flex-row items-center gap-2 border border-primary/15">
+                <ShieldCheck size={16} color={Colors.primary} />
+                <DukanText className="text-[11px] text-textSecondary flex-1 leading-4">
+                  يتم جلب سعر الشحن من أرامكس بناءً على الوزن ووجهة التوصيل. يرجى إدخال بيانات العنوان الصحيحة.
                 </DukanText>
               </View>
 
@@ -653,6 +663,7 @@ export default function CustomerCart() {
                       <Scale size={16} color={Colors.primary} />
                       <TextInput
                         value={kilo}
+                        editable={!calculateShippingMutation.isPending}
                         onChangeText={setKilo}
                         keyboardType="decimal-pad"
                         placeholder="1.0"
@@ -758,19 +769,17 @@ export default function CustomerCart() {
                       return (
                         <TouchableOpacity
                           key={country.code}
-                          onPress={() => setSelectedCountryCode(country.code)}
-                          className={`flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl border ${
-                            isSelected
+                          onPress={() => handleSelectCountry(country.code)}
+                          className={`flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl border ${isSelected
                               ? "bg-primary border-primary"
                               : "bg-surface/30 border-surfaceSelected/70"
-                          }`}
+                            }`}
                         >
                           <DukanText className="text-xs">{country.flag}</DukanText>
                           <DukanText
                             bold={isSelected}
-                            className={`text-xs ${
-                              isSelected ? "text-white" : "text-text"
-                            }`}
+                            className={`text-xs ${isSelected ? "text-white" : "text-text"
+                              }`}
                           >
                             {country.name}
                           </DukanText>
@@ -800,6 +809,7 @@ export default function CustomerCart() {
                       <Building2 size={15} color={Colors.textSecondary} />
                       <TextInput
                         value={city}
+                        editable={!calculateShippingMutation.isPending}
                         onChangeText={setCity}
                         placeholder="مثال: الرياض / دبي"
                         placeholderTextColor="#9CA3AF"
@@ -811,22 +821,44 @@ export default function CustomerCart() {
 
                   <View className="flex-1">
                     <DukanText bold className="text-xs text-textSecondary mb-1.5">
-                      الرمز البريدي (اختياري)
+                      الرمز البريدي {selectedCountryObj.postCodeRequired ? "*" : "(حسب الدولة)"}
                     </DukanText>
                     <View className="flex-row items-center bg-surface/40 rounded-xl border border-surfaceSelected px-3 py-1">
                       <Mail size={15} color={Colors.textSecondary} />
                       <TextInput
                         value={postalCode}
+                        editable={!calculateShippingMutation.isPending}
                         onChangeText={setPostalCode}
                         placeholder="مثال: 11564"
                         placeholderTextColor="#9CA3AF"
-                        keyboardType="numeric"
+                        autoCapitalize="characters"
                         className="flex-1 text-right text-xs text-text px-2 py-1.5"
                         style={{ fontFamily: Fonts.Cairo_Medium }}
                       />
                     </View>
                   </View>
                 </View>
+
+                <View>
+                  <DukanText bold className="text-xs text-textSecondary mb-1.5">
+                    رمز الولاية / المنطقة {selectedCountryObj.stateRequired ? "*" : "(حسب الدولة)"}
+                  </DukanText>
+                  <TextInput
+                    value={stateOrProvinceCode}
+                    editable={!calculateShippingMutation.isPending}
+                    onChangeText={setStateOrProvinceCode}
+                    autoCapitalize="characters"
+                    placeholder="مثال: NY"
+                    className="text-right text-xs text-text p-3 rounded-xl border border-surfaceSelected"
+                    style={{ fontFamily: Fonts.Cairo_Medium }}
+                  />
+                </View>
+
+                {calculateShippingMutation.isError && (
+                  <DukanText className="text-xs text-red-700">
+                    {calculateShippingMutation.error?.response?.data?.error || "تعذر جلب سعر الشحن، يرجى المحاولة مجدداً"}
+                  </DukanText>
+                )}
 
                 {/* Calculate Shipping Button */}
                 <TouchableOpacity
@@ -847,7 +879,7 @@ export default function CustomerCart() {
                 </TouchableOpacity>
 
                 {/* Calculation Result Feedback */}
-                {cart?.aramex?.isCalculated && (
+                {isShippingCalculated && (
                   <View className="bg-green-50 rounded-xl p-3 border border-green-200 mt-1">
                     <View className="flex-row items-center justify-between mb-1">
                       <View className="flex-row items-center gap-1.5">
@@ -861,8 +893,9 @@ export default function CustomerCart() {
                       </DukanText>
                     </View>
                     <DukanText className="text-[11px] text-green-700">
-                      مدة التوصيل التقديرية: {cart.aramex.estimatedDays || "1-3 أيام عمل"} • الوجهة: {cart.aramex.city || city} ({cart.aramex.countryCode || selectedCountryCode})
+                      الوجهة: {cart.aramex.city} ({cart.aramex.countryCode})
                     </DukanText>
+                    {cart.aramex.isSandbox && <DukanText className="text-[11px] text-amber-700">سعر تجريبي</DukanText>}
                   </View>
                 )}
               </View>
@@ -905,7 +938,7 @@ export default function CustomerCart() {
                   <View className="flex-row items-center gap-1">
                     <Truck size={13} color="#E61E28" />
                     <DukanText className="text-xs text-textSecondary">
-                      شحن أرامكس (صندوق 45 سم)
+                      شحن أرامكس السريع
                     </DukanText>
                   </View>
                   {isShippingCalculated ? (
@@ -941,66 +974,74 @@ export default function CustomerCart() {
               </View>
             </View>
 
-            {/* 5. CHECKOUT ACTION BUTTON */}
-            <TouchableOpacity
-              onPress={() => {
-                if (!linkedAddress) {
+            {/* 5. CHECKOUT ACTION BUTTON (Only shown after shipping is calculated) */}
+            {isShippingCalculated ? (
+              <TouchableOpacity
+                onPress={() => {
+                  if (!linkedAddress) {
+                    Toast.show({
+                      type: "info",
+                      text1: "تنبيه",
+                      text2: "يرجى تحديد عنوان التوصيل لإتمام الطلب",
+                      position: "bottom",
+                    });
+                    router.push("/address");
+                    return;
+                  }
                   Toast.show({
-                    type: "info",
-                    text1: "تنبيه",
-                    text2: "يرجى تحديد عنوان التوصيل لإتمام الطلب",
+                    type: "success",
+                    text1: "متابعة الشراء",
+                    text2: `المجموع النهائي: ${finalTotal.toFixed(2)} ${currency}`,
                     position: "bottom",
                   });
-                  router.push("/address");
-                  return;
-                }
-                if (!isShippingCalculated) {
-                  Alert.alert(
-                    "حساب الشحن",
-                    "هل ترغب باحتساب تكلفة الشحن عبر أرامكس قبل المتابعة؟",
-                    [
-                      {
-                        text: "احسب الآن",
-                        onPress: handleCalculateShipping,
-                      },
-                      {
-                        text: "متابعة",
-                        onPress: () => {
-                          Toast.show({
-                            type: "success",
-                            text1: "متابعة الطلب",
-                            text2: "جارٍ توجيهك لصفحة الدفع...",
-                            position: "bottom",
-                          });
-                        },
-                      },
-                    ]
-                  );
-                  return;
-                }
-                Toast.show({
-                  type: "success",
-                  text1: "متابعة الشراء",
-                  text2: `المجموع النهائي: ${finalTotal.toFixed(2)} ${currency}`,
-                  position: "bottom",
-                });
-              }}
-              className="bg-primary rounded-2xl py-4 px-5 flex-row items-center justify-between shadow-lg active:scale-[0.99] mb-4"
-            >
-              <View>
-                <DukanText className="text-xs text-white/80">المجموع للدفع</DukanText>
-                <DukanText bold className="text-lg text-white">
-                  {finalTotal.toFixed(2)} {currency}
-                </DukanText>
-              </View>
+                }}
+                className="bg-primary rounded-2xl py-4 px-5 flex-row items-center justify-between shadow-lg active:scale-[0.99] mb-4"
+              >
+                <View>
+                  <DukanText className="text-xs text-white/80">المجموع للدفع</DukanText>
+                  <DukanText bold className="text-lg text-white">
+                    {finalTotal.toFixed(2)} {currency}
+                  </DukanText>
+                </View>
 
-              <View className="flex-row items-center gap-1.5 bg-white/20 px-4 py-2 rounded-xl">
-                <DukanText bold className="text-white text-sm">
-                  إتمام الطلب
-                </DukanText>
-                <ChevronLeft size={18} color={Colors.white} />
+                <View className="flex-row items-center gap-1.5 bg-white/20 px-4 py-2 rounded-xl">
+                  <DukanText bold className="text-white text-sm">
+                    إتمام الطلب
+                  </DukanText>
+                  <ChevronLeft size={18} color={Colors.white} />
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <View className="bg-amber-50 rounded-2xl p-4 border border-amber-200/80 mb-4 flex-row items-center justify-between shadow-sm">
+                <View className="flex-row items-center gap-2.5 flex-1 pl-2">
+                  <View className="w-9 h-9 rounded-xl bg-amber-100 items-center justify-center">
+                    <Truck size={18} color="#D97706" />
+                  </View>
+                  <View className="flex-1">
+                    <DukanText bold className="text-xs text-amber-900">
+                      احتساب الشحن مطلوب للمتابعة
+                    </DukanText>
+                    <DukanText className="text-[11px] text-amber-700 leading-4">
+                      يرجى احتساب تكلفة الشحن أعلاه لإظهار زر إتمام الطلب
+                    </DukanText>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  onPress={handleCalculateShipping}
+                  disabled={calculateShippingMutation.isPending}
+                  className="bg-[#E61E28] px-3.5 py-2.5 rounded-xl flex-row items-center gap-1.5 shadow-xs active:opacity-90"
+                >
+                  {calculateShippingMutation.isPending ? (
+                    <ActivityIndicator size="small" color={Colors.white} />
+                  ) : (
+                    <RefreshCw size={13} color={Colors.white} />
+                  )}
+                  <DukanText bold className="text-xs text-white">
+                    احسب الآن
+                  </DukanText>
+                </TouchableOpacity>
               </View>
-            </TouchableOpacity>
+            )}
           </>
         )}
       </ScrollView>
@@ -1012,7 +1053,7 @@ export default function CustomerCart() {
         selectedCountryCode={selectedCountryCode}
         defaultAddress={defaultAddress}
         onSelect={(country) => {
-          setSelectedCountryCode(country.code);
+          handleSelectCountry(country.code);
         }}
       />
     </SafeAreaView>

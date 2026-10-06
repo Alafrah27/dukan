@@ -20,7 +20,15 @@ class ShippingService {
    * Get default fulfillment origin
    */
   getDefaultOrigin() {
-    return { ...this.defaultOrigin };
+    return {
+      ...this.defaultOrigin,
+      city: process.env.ARAMEX_ORIGIN_CITY || this.defaultOrigin.city,
+      stateOrProvinceCode: process.env.ARAMEX_ORIGIN_STATE || "",
+      postalCode: process.env.ARAMEX_ORIGIN_POSTAL_CODE || "",
+      addressLine1:
+        process.env.ARAMEX_ORIGIN_ADDRESS_LINE1 ||
+        this.defaultOrigin.addressLine1,
+    };
   }
 
   /**
@@ -40,7 +48,7 @@ class ShippingService {
         id: provider.name,
         name: provider.displayName,
         isConfigured: provider.isConfigured(),
-        status: "active",
+        status: provider.isConfigured() ? "active" : "not_configured",
       };
     });
   }
@@ -61,17 +69,38 @@ class ShippingService {
     currency = "SAR",
     provider = null,
   }) {
-    const finalOrigin = { ...this.defaultOrigin, ...origin };
+    if (
+      origin !== undefined &&
+      (!origin || typeof origin !== "object" || Array.isArray(origin))
+    ) {
+      throw Object.assign(new Error("بيانات عنوان المرسل غير صالحة"), {
+        status: 400,
+      });
+    }
+    const finalOrigin = { ...this.getDefaultOrigin(), ...origin };
 
     if (!destination || !destination.countryCode) {
-      throw new Error("بيانات الوجهة غير مكتملة: رمز الدولة مطلوب لحساب قيمة الشحن");
+      throw Object.assign(
+        new Error(
+          "بيانات الوجهة غير مكتملة: رمز الدولة مطلوب لحساب قيمة الشحن",
+        ),
+        { status: 400 },
+      );
     }
 
-    // If a specific provider is requested
-    if (provider) {
-      const selectedProvider = this.providers[provider.toLowerCase()];
+    // Querying all providers must preserve failures, rather than return an empty success.
+    if (provider != null) {
+      if (typeof provider !== "string") {
+        throw Object.assign(new Error("مزود الشحن غير صالح"), { status: 400 });
+      }
+      const providerId = provider.trim().toLowerCase();
+      const selectedProvider = Object.hasOwn(this.providers, providerId)
+        ? this.providers[providerId]
+        : null;
       if (!selectedProvider) {
-        throw new Error(`مزود الشحن ${provider} غير مدعوم حالياً`);
+        throw Object.assign(new Error("مزود الشحن غير مدعوم حالياً"), {
+          status: 400,
+        });
       }
       const quote = await selectedProvider.calculateRate({
         origin: finalOrigin,
@@ -83,19 +112,14 @@ class ShippingService {
     }
 
     // Query all active providers in parallel
-    const quotePromises = Object.values(this.providers).map(async (p) => {
-      try {
-        return await p.calculateRate({
-          origin: finalOrigin,
-          destination,
-          packageDetails,
-          currency,
-        });
-      } catch (err) {
-        console.error(`Error calculating rate for ${p.name}:`, err.message);
-        return null;
-      }
-    });
+    const quotePromises = Object.values(this.providers).map((p) =>
+      p.calculateRate({
+        origin: finalOrigin,
+        destination,
+        packageDetails,
+        currency,
+      }),
+    );
 
     const results = await Promise.all(quotePromises);
     return results.filter(Boolean);
